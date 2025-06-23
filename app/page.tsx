@@ -4,7 +4,7 @@ import { useState, useEffect } from "react"
 import { FileList } from "@/components/file-list"
 import { EditorPane } from "@/components/editor-pane"
 import { ConnectWalletButton } from "@/components/connect-wallet-button"
-import { LayoutPanelLeft, Edit3, HelpCircle } from "lucide-react"
+import { LayoutPanelLeft, Edit3, HelpCircle } from "lucide-react" // Removed Smartphone icon as it's no longer used
 import { useMediaQuery } from "@/hooks/use-media-query"
 
 export interface FileData {
@@ -219,8 +219,16 @@ export default function MarkdownManagerPage() {
         )
       ) : (
         <div className="flex flex-1 flex-col items-center justify-center text-center p-4">
+          {/* "Add to Home Screen" tip has been removed */}
           <p className="text-lg mb-4">Please connect your wallet to manage your files.</p>
           <HelpCircle className="h-12 w-12 text-muted-foreground" />
+          <div className="mt-8 max-w-md text-sm text-muted-foreground space-y-2 text-center">
+            <p>My mind is mine — not yours (AI, Zuck, Elon, Sam… etc).</p>
+            <p>What I share with my friends stays between us.</p>
+            <p>No third parties. No platforms.</p>
+            <p className="mt-3">No warranty. No guarantees.</p>
+            <p>Verify me on GitHub — principles and code.</p>
+          </div>
         </div>
       )}
       <footer className="p-3 border-t text-center text-xs md:text-sm text-muted-foreground">

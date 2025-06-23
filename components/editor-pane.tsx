@@ -43,21 +43,18 @@ export function EditorPane({ file, onUpdateFile, isNew, isMobile, onBack }: Edit
   }, [file])
 
   useEffect(() => {
-    if (isMobile) return // Don't track changes in read-only mobile view
     if (fileName !== initialFileName || markdownContent !== initialMarkdownContent) {
       setIsModified(true)
     } else {
       setIsModified(false)
     }
-  }, [fileName, markdownContent, initialFileName, initialMarkdownContent, isMobile])
+  }, [fileName, markdownContent, initialFileName, initialMarkdownContent])
 
   const handleFileNameChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (isMobile) return
     setFileName(e.target.value)
   }
 
   const handleMarkdownChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
-    if (isMobile) return
     setMarkdownContent(e.target.value)
   }
 
@@ -105,7 +102,7 @@ export function EditorPane({ file, onUpdateFile, isNew, isMobile, onBack }: Edit
         return (
           <>
             <UploadCloud className="h-4 w-4 mr-2" />
-            {isNew ? "Encrypt & Publish" : "Encrypt & Update File"}
+            {isNew ? "Publish" : "Update"}
           </>
         )
     }
@@ -125,17 +122,16 @@ export function EditorPane({ file, onUpdateFile, isNew, isMobile, onBack }: Edit
           Back to File List
         </Button>
       )}
-      <div className="flex items-center gap-2 flex-wrap">
-        <div className="flex-grow flex items-center gap-2 min-w-[150px]">
+      <div className="flex flex-col gap-4">
+        <div className="flex items-center gap-2">
           <Input
             type="text"
             value={fileName}
             onChange={handleFileNameChange}
             placeholder="Enter file name"
             className="flex-grow text-lg font-medium"
-            readOnly={isMobile}
           />
-          {isModified && !isMobile && (
+          {isModified && (
             <Badge
               variant="outline"
               className="border-orange-500 text-orange-600 dark:border-orange-400 dark:text-orange-400 whitespace-nowrap"
@@ -145,41 +141,41 @@ export function EditorPane({ file, onUpdateFile, isNew, isMobile, onBack }: Edit
             </Badge>
           )}
         </div>
-        {!isMobile && (
-          <div className="flex items-center gap-2 flex-shrink-0">
-            <Button
-              onClick={handleEncryptAndUpdate}
-              disabled={
-                (buttonState !== "idle" && buttonState !== "success" && buttonState !== "error") ||
-                (!isModified && !isNew)
-              }
-              title={
-                !isModified && !isNew ? "No changes to save" : isNew ? "Publish this new file" : "Save your changes"
-              }
-            >
-              {getButtonContent()}
-            </Button>
+        <div className="flex items-center gap-2 flex-wrap">
+          <Button
+            onClick={handleEncryptAndUpdate}
+            disabled={
+              (buttonState !== "idle" && buttonState !== "success" && buttonState !== "error") ||
+              (!isModified && !isNew)
+            }
+            title={!isModified && !isNew ? "No changes to save" : isNew ? "Publish this new file" : "Save your changes"}
+            className="flex-1"
+          >
+            {getButtonContent()}
+          </Button>
+          <div className="flex gap-2 flex-1">
             <Button
               variant="outline"
               onClick={() => setIsShareDialogOpen(true)}
               disabled={isNew}
               title={isNew ? "Publish the file first to enable sharing" : "Share file"}
+              className="flex-1"
             >
               <Share2 className="h-4 w-4 mr-2" />
               Share
             </Button>
+            <Button variant="outline" onClick={() => setIsHistoryOpen(true)} className="flex-1">
+              <History className="h-4 w-4 mr-2" />
+              History
+            </Button>
           </div>
-        )}
-        <Button variant="outline" onClick={() => setIsHistoryOpen(true)} className={isMobile ? "flex-grow" : ""}>
-          <History className="h-4 w-4 mr-2" />
-          View History
-        </Button>
+        </div>
       </div>
 
-      <div className={`flex-1 grid gap-4 overflow-hidden ${isMobile ? "grid-cols-1" : "grid-cols-2"}`}>
-        <div className="flex flex-col">
+      <div className="flex-1 grid grid-cols-1 gap-4 overflow-hidden">
+        <div className="flex flex-col h-full">
           <label htmlFor="markdown-editor" className="text-sm font-medium mb-1">
-            {isMobile ? "Content (Read-Only)" : "Markdown Editor"}
+            Markdown Editor
           </label>
           <Textarea
             id="markdown-editor"
@@ -187,7 +183,6 @@ export function EditorPane({ file, onUpdateFile, isNew, isMobile, onBack }: Edit
             onChange={handleMarkdownChange}
             className="flex-1 resize-none font-mono text-sm"
             aria-label="Markdown Content"
-            readOnly={isMobile}
           />
         </div>
         {!isMobile && (
@@ -206,15 +201,13 @@ export function EditorPane({ file, onUpdateFile, isNew, isMobile, onBack }: Edit
         versions={file.versions}
         fileName={fileName}
       />
-      {!isMobile && (
-        <ShareDialog
-          isOpen={isShareDialogOpen}
-          onOpenChange={setIsShareDialogOpen}
-          fileName={fileName}
-          fileId={file.id}
-          onShare={handleShare}
-        />
-      )}
+      <ShareDialog
+        isOpen={isShareDialogOpen}
+        onOpenChange={setIsShareDialogOpen}
+        fileName={fileName}
+        fileId={file.id}
+        onShare={handleShare}
+      />
     </div>
   )
 }
