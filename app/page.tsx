@@ -5,6 +5,7 @@ import { FileList } from "@/components/file-list"
 import { EditorPane } from "@/components/editor-pane"
 import { ConnectWalletButton } from "@/components/connect-wallet-button"
 import { LayoutPanelLeft, Edit3, HelpCircle } from "lucide-react"
+import { useMediaQuery } from "@/hooks/use-media-query"
 
 export interface FileData {
   id: string
@@ -58,20 +59,20 @@ export default function MarkdownManagerPage() {
   const [selectedFile, setSelectedFile] = useState<FileData | null>(null)
   const [isWalletConnected, setIsWalletConnected] = useState(false)
   const [walletAddress, setWalletAddress] = useState<string | null>(null)
-  // Add new state for tracking if the editor is for a new file
   const [isEditingNewFile, setIsEditingNewFile] = useState(false)
+  const isMobile = useMediaQuery("(max-width: 768px)")
 
   useEffect(() => {
-    if (isWalletConnected && files.length > 0) {
+    if (isWalletConnected && files.length > 0 && !isMobile) {
       setSelectedFile(files[0])
     } else if (!isWalletConnected) {
       setSelectedFile(null)
     }
-  }, [isWalletConnected, files])
+  }, [isWalletConnected, files, isMobile])
 
   const handleConnectWallet = () => {
     setIsWalletConnected(true)
-    setWalletAddress("0x1234...abcd") // Mock address
+    setWalletAddress("0x1234...abcd")
   }
 
   const handleDisconnectWallet = () => {
@@ -84,35 +85,34 @@ export default function MarkdownManagerPage() {
     const file = files.find((f) => f.id === fileId)
     if (file) {
       setSelectedFile(file)
-      setIsEditingNewFile(false) // Existing file selected
+      setIsEditingNewFile(false)
     }
   }
 
   const handleNewFile = () => {
     const newFile: FileData = {
-      id: String(Date.now()), // Temporary ID for a new file
+      id: String(Date.now()),
       name: "Untitled.md",
       content: "# New File\n\nStart writing...",
       latestVersionTimestamp: new Date().toISOString(),
       versions: [
         {
-          cid: `QmNew${Date.now().toString().slice(-4)}`, // Placeholder CID
-          txHash: "0xpending", // Placeholder TxHash
+          cid: `QmNew${Date.now().toString().slice(-4)}`,
+          txHash: "0xpending",
           timestamp: new Date().toISOString(),
           content: "# New File\n\nStart writing...",
         },
       ],
     }
     setSelectedFile(newFile)
-    setIsEditingNewFile(true) // New file is being edited
+    setIsEditingNewFile(true)
   }
 
   const handleUpdateFile = (fileId: string, newName: string, newContent: string) => {
     const existingFile = files.find((f) => f.id === fileId)
     const currentTimestamp = new Date().toISOString()
 
-    if (existingFile) {
-      // Updating an existing file
+    if (existingFile && !isEditingNewFile) {
       const newVersion: FileVersion = {
         cid: `QmUpd${Date.now().toString().slice(-4)}`,
         txHash: `0x${Math.random().toString(16).slice(2, 8)}`,
@@ -128,11 +128,9 @@ export default function MarkdownManagerPage() {
       }
       setFiles(files.map((f) => (f.id === fileId ? updatedFileData : f)))
       setSelectedFile(updatedFileData)
-      // isEditingNewFile remains false
     } else {
-      // Saving a new file for the first time (publishing)
       const newFileData: FileData = {
-        id: fileId, // Use the ID from the new file object (was temporary)
+        id: fileId,
         name: newName,
         content: newContent,
         latestVersionTimestamp: currentTimestamp,
@@ -145,19 +143,65 @@ export default function MarkdownManagerPage() {
           },
         ],
       }
-      setFiles((prevFiles) => [newFileData, ...prevFiles.filter((f) => f.id !== fileId)]) // Add new file, remove any temp with same ID if logic allows
+      setFiles((prevFiles) => [newFileData, ...prevFiles.filter((f) => f.id !== fileId)])
       setSelectedFile(newFileData)
-      setIsEditingNewFile(false) // File is now published, no longer "new" in editor context
+      setIsEditingNewFile(false)
     }
-    // alert('File action complete (mocked)');
   }
+
+  const renderDesktopLayout = () => (
+    <div className="flex flex-1 overflow-hidden">
+      <aside className="w-1/3 min-w-[250px] max-w-[350px] border-r p-4 overflow-y-auto">
+        <FileList
+          files={files}
+          selectedFileId={selectedFile?.id}
+          onSelectFile={handleSelectFile}
+          onNewFile={handleNewFile}
+        />
+      </aside>
+      <main className="flex-1 p-4 overflow-y-auto">
+        {selectedFile ? (
+          <EditorPane
+            key={selectedFile.id}
+            file={selectedFile}
+            onUpdateFile={handleUpdateFile}
+            isNew={isEditingNewFile}
+            isMobile={false}
+            onBack={() => {}} // Not used on desktop
+          />
+        ) : (
+          <div className="flex flex-col items-center justify-center h-full text-muted-foreground">
+            <Edit3 className="h-16 w-16 mb-4" />
+            <p>Select a file to view or edit, or create a new one.</p>
+          </div>
+        )}
+      </main>
+    </div>
+  )
+
+  const renderMobileLayout = () => (
+    <div className="flex-1 overflow-y-auto p-4">
+      {selectedFile ? (
+        <EditorPane
+          key={selectedFile.id}
+          file={selectedFile}
+          onUpdateFile={handleUpdateFile}
+          isNew={isEditingNewFile}
+          isMobile={true}
+          onBack={() => setSelectedFile(null)}
+        />
+      ) : (
+        <FileList files={files} selectedFileId={null} onSelectFile={handleSelectFile} onNewFile={handleNewFile} />
+      )}
+    </div>
+  )
 
   return (
     <div className="flex flex-col h-screen bg-background text-foreground">
-      <header className="flex items-center justify-between p-3 border-b">
+      <header className="flex items-center justify-between p-3 border-b sticky top-0 bg-background/95 backdrop-blur-sm z-10">
         <div className="flex items-center gap-2">
           <LayoutPanelLeft className="h-6 w-6 text-primary" />
-          <h1 className="text-xl font-semibold">Web3 Markdown Manager</h1>
+          <h1 className="text-lg md:text-xl font-semibold">Web3 Markdown Manager</h1>
         </div>
         <ConnectWalletButton
           isConnected={isWalletConnected}
@@ -168,38 +212,18 @@ export default function MarkdownManagerPage() {
       </header>
 
       {isWalletConnected ? (
-        <div className="flex flex-1 overflow-hidden">
-          <aside className="w-1/4 min-w-[250px] max-w-[350px] border-r p-4 overflow-y-auto">
-            <FileList
-              files={files}
-              selectedFileId={selectedFile?.id}
-              onSelectFile={handleSelectFile}
-              onNewFile={handleNewFile}
-            />
-          </aside>
-          <main className="flex-1 p-4 overflow-y-auto">
-            {selectedFile ? (
-              <EditorPane
-                key={selectedFile.id}
-                file={selectedFile}
-                onUpdateFile={handleUpdateFile}
-                isNew={isEditingNewFile} // Pass the new prop
-              />
-            ) : (
-              <div className="flex flex-col items-center justify-center h-full text-muted-foreground">
-                <Edit3 className="h-16 w-16 mb-4" />
-                <p>Select a file to view or edit, or create a new one.</p>
-              </div>
-            )}
-          </main>
-        </div>
+        isMobile ? (
+          renderMobileLayout()
+        ) : (
+          renderDesktopLayout()
+        )
       ) : (
-        <div className="flex flex-1 flex-col items-center justify-center">
+        <div className="flex flex-1 flex-col items-center justify-center text-center p-4">
           <p className="text-lg mb-4">Please connect your wallet to manage your files.</p>
           <HelpCircle className="h-12 w-12 text-muted-foreground" />
         </div>
       )}
-      <footer className="p-3 border-t text-center text-sm text-muted-foreground">
+      <footer className="p-3 border-t text-center text-xs md:text-sm text-muted-foreground">
         Optimism Blockchain & IPFS | Client-side Encryption | Version {new Date().getFullYear()}
       </footer>
     </div>
