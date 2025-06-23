@@ -228,6 +228,7 @@ export function EditorPane({ file, onUpdateFile, isNew }: EditorPaneProps) {
         isOpen={isShareDialogOpen}
         onOpenChange={setIsShareDialogOpen}
         fileName={fileName}
+        fileId={file.id} // Add fileId prop
         onShare={handleShare}
       />
     </div>
