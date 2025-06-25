@@ -59,19 +59,26 @@ export function EditorPane({ file, onUpdateFile, isNew, isMobile, onBack }: Edit
   }
 
   const handleEncryptAndUpdate = async () => {
-    setButtonState("encrypting")
-    await new Promise((resolve) => setTimeout(resolve, 1000))
-    setButtonState("uploading")
-    await new Promise((resolve) => setTimeout(resolve, 1000))
-    setButtonState("saving")
-    await new Promise((resolve) => setTimeout(resolve, 1000))
-    onUpdateFile(file.id, fileName, markdownContent)
-    setInitialFileName(fileName)
-    setInitialMarkdownContent(markdownContent)
-    setIsModified(false)
-    setButtonState("success")
-    await new Promise((resolve) => setTimeout(resolve, 1500))
-    setButtonState("idle")
+    try {
+      setButtonState("encrypting")
+      // 调用真实的更新函数
+      await onUpdateFile(file.id, fileName, markdownContent)
+      
+      setInitialFileName(fileName)
+      setInitialMarkdownContent(markdownContent)
+      setIsModified(false)
+      setButtonState("success")
+      
+      setTimeout(() => {
+        setButtonState("idle")
+      }, 2000)
+    } catch (error) {
+      console.error('Failed to update file:', error)
+      setButtonState("error")
+      setTimeout(() => {
+        setButtonState("idle")
+      }, 3000)
+    }
   }
 
   const getButtonContent = () => {
@@ -172,27 +179,17 @@ export function EditorPane({ file, onUpdateFile, isNew, isMobile, onBack }: Edit
         </div>
       </div>
 
-      <div className="flex-1 grid grid-cols-1 gap-4 overflow-hidden">
-        <div className="flex flex-col h-full">
-          <label htmlFor="markdown-editor" className="text-sm font-medium mb-1">
-            Markdown Editor
-          </label>
-          <Textarea
-            id="markdown-editor"
-            value={markdownContent}
-            onChange={handleMarkdownChange}
-            className="flex-1 resize-none font-mono text-sm"
-            aria-label="Markdown Content"
-          />
-        </div>
-        {!isMobile && (
-          <div className="flex flex-col">
-            <label className="text-sm font-medium mb-1">Live Preview (placeholder)</label>
-            <div className="flex-1 border rounded-md p-4 bg-muted/40 overflow-y-auto prose prose-sm dark:prose-invert max-w-none">
-              <pre className="whitespace-pre-wrap break-words text-sm">{markdownContent}</pre>
-            </div>
-          </div>
-        )}
+      <div className="flex-1 flex flex-col overflow-hidden">
+        <label htmlFor="markdown-editor" className="text-sm font-medium mb-1">
+          Markdown Editor
+        </label>
+        <Textarea
+          id="markdown-editor"
+          value={markdownContent}
+          onChange={handleMarkdownChange}
+          className="flex-1 resize-none font-mono text-sm"
+          aria-label="Markdown Content"
+        />
       </div>
 
       <HistoryViewer

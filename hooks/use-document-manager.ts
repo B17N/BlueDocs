@@ -6,8 +6,20 @@ import {
   mintDocumentFromIPFS, 
   getUserNFTs, 
   parseEncryptionInfoFromMemo,
-  type NFTInfo 
+  parseDocMemoData,
+  updateDocumentMemo,
+  type NFTInfo,
+  type DocMemoData,
+  type DocumentMetadataForNFT
 } from '@/lib/contract';
+import { 
+  generateDocumentMetadata, 
+  generateFileName, 
+  detectDocumentType, 
+  generatePreview, 
+  extractTitle,
+  type DocumentMetadata 
+} from '@/lib/document-utils';
 import { useWallet } from './use-wallet';
 
 /**
@@ -113,9 +125,9 @@ export const useDocumentManager = () => {
       const uploadResult = await uploadToIPFS(encryptedData, {
         fileName: 'encrypted-document.bin',
         metadata: {
-          encrypted: true,
+          encrypted: 'true',
           timestamp: new Date().toISOString(),
-          hasMetaMaskKeys: !!encryptedKeys
+          hasMetaMaskKeys: encryptedKeys ? 'true' : 'false'
         }
       });
 
@@ -216,10 +228,14 @@ export const useDocumentManager = () => {
    * 创建文档 NFT
    * 
    * @param uploadResult - 文档上传结果
+   * @param content - 原始文档内容（用于生成元数据）
+   * @param fileName - 文件名（可选）
    * @returns 交易哈希
    */
   const createDocumentNFT = useCallback(async (
-    uploadResult: DocumentUploadResult
+    uploadResult: DocumentUploadResult,
+    content: string,
+    fileName?: string
   ): Promise<string> => {
     if (!wallet.isConnected) {
       throw new Error('Wallet must be connected to create NFT');
@@ -228,11 +244,28 @@ export const useDocumentManager = () => {
     setNftState({ isLoading: true, error: '', success: false });
 
     try {
+      // 生成文档元数据
+      const docMetadata = generateDocumentMetadata(content, fileName);
+      const docType = detectDocumentType(content, fileName);
+      const docTitle = extractTitle(content, docType);
+      const suggestedFileName = fileName || generateFileName(content, docType);
+
+      const metadata: DocumentMetadataForNFT = {
+        fileName: suggestedFileName,
+        fileType: docType,
+        title: docTitle,
+        createdAt: new Date().toISOString(),
+        size: content.length,
+        isVisible: true // 新创建的文档默认显示
+      };
+
       const txHash = await mintDocumentFromIPFS(
         uploadResult.ipfsHash,
         uploadResult.encryptionKey,
         uploadResult.nonce,
-        wallet.address
+        wallet.address,
+        metadata,
+        uploadResult.encryptedKeys
       );
 
       setNftState({ isLoading: false, error: '', success: true });
@@ -253,11 +286,13 @@ export const useDocumentManager = () => {
    * 
    * @param content - 文档内容
    * @param createNFT - 是否创建 NFT
+   * @param fileName - 文件名（可选）
    * @returns 发布结果
    */
   const publishDocument = useCallback(async (
     content: string,
-    createNFT: boolean = true
+    createNFT: boolean = true,
+    fileName?: string
   ): Promise<{ uploadResult: DocumentUploadResult; txHash?: string }> => {
     // 1. 加密并上传
     const uploadResult = await encryptAndUpload(content, true);
@@ -265,7 +300,7 @@ export const useDocumentManager = () => {
     let txHash;
     if (createNFT) {
       // 2. 创建 NFT
-      txHash = await createDocumentNFT(uploadResult);
+      txHash = await createDocumentNFT(uploadResult, content, fileName);
     }
 
     return { uploadResult, txHash };
@@ -302,20 +337,199 @@ export const useDocumentManager = () => {
   const decryptDocumentFromNFT = useCallback(async (
     nft: NFTInfo
   ): Promise<DocumentDecryptResult> => {
-    // 尝试从 memo 中解析加密信息
-    const encryptionInfo = parseEncryptionInfoFromMemo(nft.docMemo);
+    // 尝试解析新格式的 docMemo
+    const docMemoData = parseDocMemoData(nft.docMemo);
     
-    if (encryptionInfo) {
-      // 使用解析出的密钥和 nonce 直接解密
-      return await downloadAndDecrypt(
-        nft.storageAddress,
-        encryptionInfo.key,
-        encryptionInfo.nonce
-      );
+    if (docMemoData) {
+      const { encryption } = docMemoData;
+      
+      if (encryption.method === 'metamask') {
+        // 使用 MetaMask 解密
+        if (!wallet.isConnected) {
+          throw new Error('Wallet must be connected to decrypt MetaMask-encrypted documents');
+        }
+        
+        return await downloadAndDecryptWithMetaMask(
+          nft.storageAddress,
+          encryption.encryptedKey,
+          encryption.encryptedNonce
+        );
+      } else {
+        // 使用明文密钥解密（兼容旧格式）
+        return await downloadAndDecrypt(
+          nft.storageAddress,
+          encryption.encryptedKey,
+          encryption.encryptedNonce
+        );
+      }
     } else {
-      throw new Error('Cannot parse encryption information from NFT memo');
+      throw new Error('Cannot parse document information from NFT memo');
     }
-  }, [downloadAndDecrypt]);
+  }, [downloadAndDecrypt, downloadAndDecryptWithMetaMask, wallet.isConnected]);
+
+  /**
+   * 从 NFT 信息中获取文档元数据
+   * 
+   * @param nft - NFT 信息
+   * @returns 文档元数据，如果解析失败则返回默认值
+   */
+  const getDocumentMetadataFromNFT = useCallback((nft: NFTInfo): DocumentMetadataForNFT => {
+    const docMemoData = parseDocMemoData(nft.docMemo);
+    
+    if (docMemoData && docMemoData.metadata) {
+      return docMemoData.metadata;
+    }
+    
+    // 兼容旧格式，返回默认值
+    return {
+      fileName: `Document-${nft.tokenId}.md`,
+      fileType: 'markdown',
+      title: `Document #${nft.tokenId}`,
+      createdAt: nft.createdAt.toISOString(),
+      size: 0,
+      isVisible: true // 旧格式默认显示
+    };
+  }, []);
+
+  /**
+   * 标记文档为不可见（假删除）
+   * 通过更新链上的 docMemo 来实现持久化的软删除
+   * 
+   * @param nft - NFT 信息
+   * @returns 是否成功标记
+   */
+  const markDocumentAsHidden = useCallback(async (nft: NFTInfo): Promise<boolean> => {
+    if (!wallet.isConnected) {
+      throw new Error('Wallet must be connected to hide documents');
+    }
+
+    setNftState({ isLoading: true, error: '', success: false });
+
+    try {
+      // 解析当前的 docMemo
+      const docMemoData = parseDocMemoData(nft.docMemo);
+      
+      if (!docMemoData) {
+        throw new Error('Cannot parse document memo data');
+      }
+
+      // 更新 isVisible 为 false
+      const updatedDocMemoData: DocMemoData = {
+        ...docMemoData,
+        metadata: {
+          ...docMemoData.metadata,
+          isVisible: false
+        }
+      };
+
+      // 调用合约更新 docMemo
+      const txHash = await updateDocumentMemo(
+        nft.tokenId,
+        JSON.stringify(updatedDocMemoData),
+        wallet.address
+      );
+
+      console.log('Document hidden successfully, tx:', txHash);
+
+      // 更新本地状态
+      setUserNFTs(prevNFTs => 
+        prevNFTs.map(n => 
+          n.tokenId === nft.tokenId 
+            ? { ...n, docMemo: JSON.stringify(updatedDocMemoData) }
+            : n
+        )
+      );
+
+      setNftState({ isLoading: false, error: '', success: true });
+      return true;
+    } catch (err) {
+      const error = err instanceof Error ? err.message : 'Failed to hide document';
+      setNftState({ isLoading: false, error, success: false });
+      throw err;
+    }
+  }, [wallet.isConnected, wallet.address]);
+
+  /**
+   * 恢复文档可见性
+   * 通过更新链上的 docMemo 来恢复文档显示
+   * 
+   * @param nft - NFT 信息
+   * @returns 是否成功恢复
+   */
+  const restoreDocumentVisibility = useCallback(async (nft: NFTInfo): Promise<boolean> => {
+    if (!wallet.isConnected) {
+      throw new Error('Wallet must be connected to restore documents');
+    }
+
+    setNftState({ isLoading: true, error: '', success: false });
+
+    try {
+      // 解析当前的 docMemo
+      const docMemoData = parseDocMemoData(nft.docMemo);
+      
+      if (!docMemoData) {
+        throw new Error('Cannot parse document memo data');
+      }
+
+      // 更新 isVisible 为 true
+      const updatedDocMemoData: DocMemoData = {
+        ...docMemoData,
+        metadata: {
+          ...docMemoData.metadata,
+          isVisible: true
+        }
+      };
+
+      // 调用合约更新 docMemo
+      const txHash = await updateDocumentMemo(
+        nft.tokenId,
+        JSON.stringify(updatedDocMemoData),
+        wallet.address
+      );
+
+      console.log('Document restored successfully, tx:', txHash);
+
+      // 更新本地状态
+      setUserNFTs(prevNFTs => 
+        prevNFTs.map(n => 
+          n.tokenId === nft.tokenId 
+            ? { ...n, docMemo: JSON.stringify(updatedDocMemoData) }
+            : n
+        )
+      );
+
+      setNftState({ isLoading: false, error: '', success: true });
+      return true;
+    } catch (err) {
+      const error = err instanceof Error ? err.message : 'Failed to restore document';
+      setNftState({ isLoading: false, error, success: false });
+      throw err;
+    }
+  }, [wallet.isConnected, wallet.address]);
+
+  /**
+   * 获取所有可见的 NFT（过滤掉被假删除的）
+   * 
+   * @returns 可见的 NFT 列表
+   */
+  const getVisibleNFTs = useCallback((): NFTInfo[] => {
+    return userNFTs.filter(nft => {
+      const metadata = getDocumentMetadataFromNFT(nft);
+      return metadata.isVisible;
+    });
+  }, [userNFTs, getDocumentMetadataFromNFT]);
+
+  /**
+   * 获取所有隐藏的 NFT（被假删除的）
+   * 
+   * @returns 隐藏的 NFT 列表
+   */
+  const getHiddenNFTs = useCallback((): NFTInfo[] => {
+    return userNFTs.filter(nft => {
+      const metadata = getDocumentMetadataFromNFT(nft);
+      return !metadata.isVisible;
+    });
+  }, [userNFTs, getDocumentMetadataFromNFT]);
 
   /**
    * 重置所有状态
@@ -346,6 +560,11 @@ export const useDocumentManager = () => {
     // NFT 相关
     loadUserNFTs,
     decryptDocumentFromNFT,
+    getDocumentMetadataFromNFT,
+    getVisibleNFTs,
+    getHiddenNFTs,
+    markDocumentAsHidden,
+    restoreDocumentVisibility,
     
     // 工具函数
     resetStates,
