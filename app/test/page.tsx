@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react';
 import * as nacl from 'tweetnacl';
 import { encodeBase64, decodeBase64, decodeUTF8, encodeUTF8 } from 'tweetnacl-util';
+import { ethers } from 'ethers';
 
 // Declare ethereum type for TypeScript
 declare global {
@@ -10,6 +11,17 @@ declare global {
     ethereum?: any;
   }
 }
+
+// 合约ABI（仅包含createDocument方法和必要结构体）
+const DOCUMENT_NFT_ABI = [
+  "function createDocument(address _to, uint256 _amount, string _documentId, string _docUID, string _rootDocumentId, string _storageAddress, string _docMemo) external returns (uint256)",
+  "function getCurrentTokenId() external view returns (uint256)",
+  "function balanceOf(address account, uint256 id) external view returns (uint256)",
+  "function getDocumentInfo(uint256 _tokenId) external view returns (tuple(string documentId, string docUID, string rootDocumentId, string storageAddress, string docMemo, uint256 createdAt, address creator))"
+];
+
+// 合约地址从环境变量读取
+const DOCUMENT_NFT_ADDRESS = process.env.NEXT_PUBLIC_DOCUMENT_NFT_ADDRESS;
 
 export default function TestPage() {
   const [textInput, setTextInput] = useState('');
@@ -32,6 +44,11 @@ export default function TestPage() {
   const [walletAddress, setWalletAddress] = useState('');
   const [publicKey, setPublicKey] = useState('');
   const [encryptedKeys, setEncryptedKeys] = useState<{encryptedKey: string, encryptedNonce: string} | null>(null);
+
+  // NFT list state
+  const [nftList, setNftList] = useState<any[]>([]);
+  const [nftLoading, setNftLoading] = useState(false);
+  const [nftError, setNftError] = useState('');
 
   // Check if MetaMask is installed
   const isMetaMaskInstalled = () => {
@@ -57,6 +74,9 @@ export default function TestPage() {
         
         // Get encryption public key
         await getEncryptionPublicKey(accounts[0]);
+        
+        // Load NFT list after connecting
+        await loadNFTList();
       }
     } catch (err) {
       console.error('Error connecting wallet:', err);
@@ -154,6 +174,8 @@ export default function TestPage() {
             setWalletAddress(accounts[0]);
             setWalletConnected(true);
             getEncryptionPublicKey(accounts[0]);
+            // Load NFT list for connected wallet
+            loadNFTList();
           }
         })
         .catch(console.error);
@@ -375,6 +397,106 @@ export default function TestPage() {
     }
   };
 
+  // Mint NFT to wallet
+  const mintDocumentNFT = async () => {
+    if (!walletConnected) {
+      setError('Please connect your wallet first');
+      return;
+    }
+    if (!ipfsHash) {
+      setError('Please upload to IPFS first');
+      return;
+    }
+    if (!encryptionKey || !nonce) {
+      setError('Encryption key and nonce are required');
+      return;
+    }
+    if (!DOCUMENT_NFT_ADDRESS) {
+      setError('DocumentNFT contract address not configured');
+      return;
+    }
+    setLoading(true);
+    setError('');
+    try {
+      // 获取provider和signer
+      const provider = new ethers.BrowserProvider(window.ethereum);
+      const signer = await provider.getSigner();
+      // 合约实例
+      const contract = new ethers.Contract(DOCUMENT_NFT_ADDRESS, DOCUMENT_NFT_ABI, signer);
+      // 生成文档ID和UID（可用ipfsHash或时间戳等）
+      const documentId = ipfsHash.substring(0, 8); // 简短ID
+      const docUID = ipfsHash; // 唯一ID
+      const rootDocumentId = ""; // 可选，留空
+      const storageAddress = ipfsHash;
+      const docMemo = `Key: ${encryptionKey}, Nonce: ${nonce}`;
+      // 调用合约mint
+      const tx = await contract.createDocument(walletAddress, 1, documentId, docUID, rootDocumentId, storageAddress, docMemo);
+      await tx.wait();
+      alert('NFT minted successfully!');
+      // 刷新NFT列表
+      await loadNFTList();
+    } catch (err) {
+      console.error('Mint NFT error:', err);
+      setError(err instanceof Error ? err.message : 'Failed to mint NFT');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Load NFT list for current wallet
+  const loadNFTList = async () => {
+    if (!walletConnected || !DOCUMENT_NFT_ADDRESS) {
+      return;
+    }
+
+    setNftLoading(true);
+    setNftError('');
+    
+    try {
+      const provider = new ethers.BrowserProvider(window.ethereum);
+      const contract = new ethers.Contract(DOCUMENT_NFT_ADDRESS, DOCUMENT_NFT_ABI, provider);
+      
+      // 获取当前最大的tokenId
+      const currentTokenId = await contract.getCurrentTokenId();
+      const maxTokenId = Number(currentTokenId);
+      
+      const nfts = [];
+      
+      // 遍历所有可能的tokenId，检查当前钱包是否拥有
+      for (let tokenId = 1; tokenId < maxTokenId; tokenId++) {
+        try {
+          const balance = await contract.balanceOf(walletAddress, tokenId);
+          
+          if (Number(balance) > 0) {
+            // 获取NFT详细信息
+            const docInfo = await contract.getDocumentInfo(tokenId);
+            nfts.push({
+              tokenId,
+              balance: Number(balance),
+              documentId: docInfo.documentId,
+              docUID: docInfo.docUID,
+              rootDocumentId: docInfo.rootDocumentId,
+              storageAddress: docInfo.storageAddress,
+              docMemo: docInfo.docMemo,
+              createdAt: new Date(Number(docInfo.createdAt) * 1000),
+              creator: docInfo.creator
+            });
+          }
+        } catch (err) {
+          // 忽略不存在的tokenId错误
+          console.log(`Token ${tokenId} does not exist or error:`, err);
+        }
+      }
+      
+      setNftList(nfts);
+    } catch (err) {
+      console.error('Error loading NFT list:', err);
+      setNftError('Failed to load NFT list');
+    } finally {
+      setNftLoading(false);
+    }
+  };
+
   return (
     <main style={{ padding: 32, maxWidth: 800, margin: '0 auto' }}>
       <h1>MetaMask Encrypted IPFS Test Page</h1>
@@ -475,23 +597,40 @@ export default function TestPage() {
           }}
         />
         
-        <button
-          onClick={uploadToIPFS}
-          disabled={loading || !walletConnected}
-          style={{
-            marginTop: 16,
-            padding: '12px 24px',
-            fontSize: 16,
-            backgroundColor: loading || !walletConnected ? '#ccc' : '#0070f3',
-            color: 'white',
-            border: 'none',
-            borderRadius: 4,
-            cursor: loading || !walletConnected ? 'not-allowed' : 'pointer',
-            fontWeight: 500
-          }}
-        >
-          {loading ? 'Encrypting & Uploading...' : 'Encrypt & Add to IPFS'}
-        </button>
+        <div style={{ display: 'flex', gap: 12, marginTop: 16 }}>
+          <button
+            onClick={uploadToIPFS}
+            disabled={loading || !walletConnected}
+            style={{
+              padding: '12px 24px',
+              fontSize: 16,
+              backgroundColor: loading || !walletConnected ? '#ccc' : '#0070f3',
+              color: 'white',
+              border: 'none',
+              borderRadius: 4,
+              cursor: loading || !walletConnected ? 'not-allowed' : 'pointer',
+              fontWeight: 500
+            }}
+          >
+            {loading ? 'Encrypting & Uploading...' : 'Encrypt & Add to IPFS'}
+          </button>
+          <button
+            onClick={mintDocumentNFT}
+            disabled={loading || !walletConnected || !ipfsHash}
+            style={{
+              padding: '12px 24px',
+              fontSize: 16,
+              backgroundColor: loading || !walletConnected || !ipfsHash ? '#ccc' : '#f6851b',
+              color: 'white',
+              border: 'none',
+              borderRadius: 4,
+              cursor: loading || !walletConnected || !ipfsHash ? 'not-allowed' : 'pointer',
+              fontWeight: 500
+            }}
+          >
+            🪙 Mint Document NFT
+          </button>
+        </div>
       </div>
 
       {/* Decrypt Section */}
@@ -756,6 +895,183 @@ export default function TestPage() {
           </div>
         </div>
       )}
+
+      {/* NFT List Section */}
+      <div style={{ marginTop: 32, padding: 20, border: '1px solid #ddd', borderRadius: 8 }}>
+        <h2 style={{ margin: '0 0 16px', color: '#333' }}>🪙 My Document NFTs</h2>
+        
+        <div style={{ display: 'flex', gap: 12, marginBottom: 16 }}>
+          <button
+            onClick={loadNFTList}
+            disabled={nftLoading || !walletConnected}
+            style={{
+              padding: '10px 20px',
+              fontSize: 14,
+              backgroundColor: nftLoading || !walletConnected ? '#ccc' : '#6c757d',
+              color: 'white',
+              border: 'none',
+              borderRadius: 4,
+              cursor: nftLoading || !walletConnected ? 'not-allowed' : 'pointer',
+              fontWeight: 500
+            }}
+          >
+            {nftLoading ? '🔄 Loading...' : '🔄 Refresh NFT List'}
+          </button>
+          
+          {walletConnected && (
+            <span style={{ 
+              padding: '10px 16px', 
+              fontSize: 14, 
+              backgroundColor: '#e3f2fd', 
+              borderRadius: 4,
+              color: '#1976d2'
+            }}>
+              Found {nftList.length} NFT(s)
+            </span>
+          )}
+        </div>
+
+        {nftError && (
+          <div style={{
+            marginBottom: 16,
+            padding: 12,
+            backgroundColor: '#fee',
+            color: '#c00',
+            borderRadius: 4
+          }}>
+            NFT Error: {nftError}
+          </div>
+        )}
+
+        {!walletConnected ? (
+          <p style={{ margin: 0, color: '#666', fontStyle: 'italic' }}>
+            Please connect your wallet to view your NFTs
+          </p>
+        ) : nftList.length === 0 && !nftLoading ? (
+          <p style={{ margin: 0, color: '#666', fontStyle: 'italic' }}>
+            No Document NFTs found in your wallet
+          </p>
+        ) : (
+          <div style={{ display: 'grid', gap: 16 }}>
+            {nftList.map((nft) => (
+              <div
+                key={nft.tokenId}
+                style={{
+                  padding: 16,
+                  border: '1px solid #e0e0e0',
+                  borderRadius: 8,
+                  backgroundColor: '#fafafa'
+                }}
+              >
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 12 }}>
+                  <h4 style={{ margin: 0, color: '#333' }}>
+                    NFT #{nft.tokenId} - {nft.documentId}
+                  </h4>
+                  <span style={{
+                    padding: '4px 8px',
+                    fontSize: 12,
+                    backgroundColor: '#28a745',
+                    color: 'white',
+                    borderRadius: 12,
+                    fontWeight: 500
+                  }}>
+                    Balance: {nft.balance}
+                  </span>
+                </div>
+                
+                <div style={{ fontSize: 14, color: '#666', marginBottom: 8 }}>
+                  <p style={{ margin: '4px 0' }}>
+                    <strong>Document UID:</strong> 
+                    <code style={{ backgroundColor: '#e0e0e0', padding: '2px 6px', borderRadius: 3, marginLeft: 8 }}>
+                      {nft.docUID.length > 40 ? nft.docUID.substring(0, 40) + '...' : nft.docUID}
+                    </code>
+                  </p>
+                  
+                  <p style={{ margin: '4px 0' }}>
+                    <strong>IPFS Hash:</strong> 
+                    <code style={{ backgroundColor: '#e0e0e0', padding: '2px 6px', borderRadius: 3, marginLeft: 8 }}>
+                      {nft.storageAddress}
+                    </code>
+                  </p>
+                  
+                  <p style={{ margin: '4px 0' }}>
+                    <strong>Created:</strong> {nft.createdAt.toLocaleString()}
+                  </p>
+                  
+                  <p style={{ margin: '4px 0' }}>
+                    <strong>Creator:</strong> 
+                    <code style={{ backgroundColor: '#e0e0e0', padding: '2px 6px', borderRadius: 3, marginLeft: 8 }}>
+                      {nft.creator === walletAddress ? 'You' : nft.creator}
+                    </code>
+                  </p>
+                  
+                  {nft.docMemo && (
+                    <div style={{ marginTop: 8 }}>
+                      <strong>Memo:</strong>
+                      <div style={{
+                        marginTop: 4,
+                        padding: 8,
+                        backgroundColor: '#fff3cd',
+                        border: '1px solid #ffeaa7',
+                        borderRadius: 4,
+                        fontSize: 12,
+                        fontFamily: 'monospace',
+                        wordBreak: 'break-all'
+                      }}>
+                        {nft.docMemo}
+                      </div>
+                    </div>
+                  )}
+                </div>
+                
+                <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
+                  <a
+                    href={`https://gateway.pinata.cloud/ipfs/${nft.storageAddress}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    style={{
+                      padding: '6px 12px',
+                      fontSize: 12,
+                      backgroundColor: '#0070f3',
+                      color: 'white',
+                      textDecoration: 'none',
+                      borderRadius: 4,
+                      fontWeight: 500
+                    }}
+                  >
+                    📁 View on IPFS
+                  </a>
+                  
+                  <button
+                    onClick={() => {
+                      setDecryptHash(nft.storageAddress);
+                      // 尝试解析memo中的key和nonce
+                      if (nft.docMemo.includes('Key:') && nft.docMemo.includes('Nonce:')) {
+                        const keyMatch = nft.docMemo.match(/Key:\s*([^,]+)/);
+                        const nonceMatch = nft.docMemo.match(/Nonce:\s*(.+)/);
+                        if (keyMatch) setDecryptKey(keyMatch[1].trim());
+                        if (nonceMatch) setDecryptNonce(nonceMatch[1].trim());
+                      }
+                    }}
+                    style={{
+                      padding: '6px 12px',
+                      fontSize: 12,
+                      backgroundColor: '#28a745',
+                      color: 'white',
+                      border: 'none',
+                      borderRadius: 4,
+                      cursor: 'pointer',
+                      fontWeight: 500
+                    }}
+                  >
+                    🔓 Auto-fill Decrypt
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
     </main>
   );
 } 
