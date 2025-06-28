@@ -7,8 +7,8 @@ import { WalletProvider } from '@/hooks/use-wallet'
 export function ConditionalLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname()
   
-  // 如果是 /test 路径或其子路径，不使用布局和钱包
-  if (pathname?.startsWith('/test')) {
+  // 如果是 /test 路径或其子路径，或者是 /view 路径，不使用布局和钱包
+  if (pathname?.startsWith('/test') || pathname?.startsWith('/view')) {
     return <>{children}</>
   }
   

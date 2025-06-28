@@ -12,6 +12,20 @@ import { History, UploadCloud, Loader2, Share2, ArrowLeft } from "lucide-react"
 import type { FileData } from "@/app/page"
 import type { NFTInfo } from "@/lib/contract"
 import { ShareDialog } from "@/components/share-dialog"
+import { useToast } from "@/hooks/use-toast"
+import { useDocumentManager } from "@/hooks/use-document-manager"
+import { useWallet } from "@/hooks/use-wallet"
+import {
+  generateAESKey,
+  exportKeyToHex,
+  encryptWithAES,
+  splitKey,
+  encryptPartialKey,
+  generateShareUrl
+} from "@/lib/share-encryption"
+import { uploadToIPFS } from "@/lib/ipfs"
+import { createDocumentNFT, DOCUMENT_NFT_ABI, getDocumentNFTContract } from "@/lib/contract"
+import { ethers } from "ethers"
 
 interface EditorPaneProps {
   file: FileData
@@ -31,6 +45,9 @@ export function EditorPane({ file, onUpdateFile, isNew, isMobile, onBack, nft, o
   const [isHistoryOpen, setIsHistoryOpen] = useState(false)
   const [buttonState, setButtonState] = useState<ButtonState>("idle")
   const [isShareDialogOpen, setIsShareDialogOpen] = useState(false)
+  const { toast } = useToast()
+  const documentManager = useDocumentManager()
+  const { address: walletAddress } = useWallet()
 
   const [initialFileName, setInitialFileName] = useState(file.name)
   const [initialMarkdownContent, setInitialMarkdownContent] = useState(file.content)
@@ -119,10 +136,127 @@ export function EditorPane({ file, onUpdateFile, isNew, isMobile, onBack, nft, o
     }
   }
 
-  const handleShare = async (address: string) => {
-    console.log(`Sharing file ${file.id} with address ${address}`)
-    await new Promise((resolve) => setTimeout(resolve, 1500))
-    alert(`Access granted to ${address} (mocked).`)
+  const handleShare = async (content: string): Promise<string> => {
+    if (!walletAddress) {
+      throw new Error("Wallet not connected");
+    }
+
+    try {
+      // Step 1: Generate AES-256 key
+      const aesKey = await generateAESKey();
+      const fullKeyHex = await exportKeyToHex(aesKey);
+      
+      // Step 2: Encrypt document with AES-256-GCM
+      const { encrypted, iv } = await encryptWithAES(content, aesKey);
+      
+      // Step 3: Upload encrypted content to IPFS
+      const uploadResult = await uploadToIPFS(encrypted);
+      const ipfsHash = uploadResult.IpfsHash;
+      
+      // Step 4: Split key and encrypt partial key
+      const { front: partialKey, secret: secretKey } = splitKey(fullKeyHex);
+      const encryptedPartialKey = encryptPartialKey(partialKey, secretKey);
+      
+      // Step 5: Create share NFT
+      const docMemoData = {
+        version: "1.0-share",
+        type: "shared",
+        metadata: {
+          fileName: fileName,
+          fileType: "markdown",
+          title: fileName.replace(/\.md$/, ''),
+          createdAt: new Date().toISOString(),
+          size: encrypted.byteLength,
+          originalTokenId: file.tokenId?.toString()
+        },
+        shareInfo: {
+          encryptedPartialKey: encryptedPartialKey,
+          iv: Array.from(iv).map(b => b.toString(16).padStart(2, '0')).join(''),
+          algorithm: "AES-256-GCM",
+          keyEncryption: "XOR",
+          sharedBy: walletAddress,
+          sharedAt: new Date().toISOString()
+        },
+        versions: [{
+          versionId: 1,
+          ipfsHash: ipfsHash,
+          timestamp: new Date().toISOString(),
+          size: encrypted.byteLength,
+          encryptedKey: encryptedPartialKey,
+          encryptedNonce: "SHARED_DOCUMENT"
+        }],
+        currentVersion: 1
+      };
+
+      const params = {
+        recipient: walletAddress,
+        amount: 1,
+        documentId: ipfsHash.substring(0, 8),
+        docUID: ipfsHash,
+        storageAddress: ipfsHash,
+        docMemo: JSON.stringify(docMemoData)
+      };
+      
+      // Create NFT and get transaction hash
+      const txHash = await createDocumentNFT(params, walletAddress);
+      
+      // Get transaction receipt to extract tokenId
+      const provider = new ethers.BrowserProvider(window.ethereum);
+      const receipt = await provider.getTransactionReceipt(txHash);
+      
+      if (!receipt) {
+        throw new Error("Failed to get transaction receipt");
+      }
+      
+      // Parse the event logs to find DocumentCreated event
+      const iface = new ethers.Interface(DOCUMENT_NFT_ABI);
+      let tokenId: number | null = null;
+      
+      // Try to find DocumentCreated event
+      const logs = receipt.logs.map(log => {
+        try {
+          return iface.parseLog(log);
+        } catch (e) {
+          return null;
+        }
+      }).filter(Boolean);
+      
+      // Look for DocumentCreated event first
+      const documentCreatedEvent = logs.find(log => log?.name === 'DocumentCreated');
+      if (documentCreatedEvent) {
+        tokenId = Number(documentCreatedEvent.args.tokenId);
+      } else {
+        // Fallback: Look for TransferSingle event (ERC1155)
+        const transferEvent = logs.find(log => log?.name === 'TransferSingle');
+        if (transferEvent) {
+          tokenId = Number(transferEvent.args.id);
+        } else {
+          // Final fallback: Get the latest tokenId from contract
+          console.log('No event found, fetching latest tokenId from contract...');
+          const contract = getDocumentNFTContract();
+          const currentTokenId = await contract.getCurrentTokenId();
+          tokenId = Number(currentTokenId);
+          
+          // Verify that this NFT belongs to the user
+          const balance = await contract.balanceOf(walletAddress, tokenId);
+          if (Number(balance) === 0) {
+            throw new Error("Failed to verify NFT ownership");
+          }
+        }
+      }
+      
+      if (!tokenId) {
+        throw new Error("Failed to get NFT token ID");
+      }
+      
+      // Step 6: Generate share URL
+      const shareUrl = generateShareUrl(tokenId, secretKey);
+      
+      return shareUrl;
+    } catch (error) {
+      console.error("Failed to create share link:", error);
+      throw error;
+    }
   }
 
   return (
@@ -168,8 +302,8 @@ export function EditorPane({ file, onUpdateFile, isNew, isMobile, onBack, nft, o
             <Button
               variant="outline"
               onClick={() => setIsShareDialogOpen(true)}
-              disabled={isNew}
-              title={isNew ? "Publish the file first to enable sharing" : "Share file"}
+              disabled={isNew || isModified}
+              title={isNew ? "Publish the file first to enable sharing" : isModified ? "Save your changes before sharing" : "Share file"}
               className="flex-1"
             >
               <Share2 className="h-4 w-4 mr-2" />
@@ -208,6 +342,7 @@ export function EditorPane({ file, onUpdateFile, isNew, isMobile, onBack, nft, o
         onOpenChange={setIsShareDialogOpen}
         fileName={fileName}
         fileId={file.id}
+        fileContent={markdownContent}
         onShare={handleShare}
       />
     </div>

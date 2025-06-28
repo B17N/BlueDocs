@@ -11,7 +11,10 @@ export const DOCUMENT_NFT_ABI = [
   "function getCurrentTokenId() external view returns (uint256)",
   "function balanceOf(address account, uint256 id) external view returns (uint256)",
   "function getDocumentInfo(uint256 _tokenId) external view returns (tuple(string documentId, string docUID, string rootDocumentId, string storageAddress, string docMemo, uint256 createdAt, address creator))",
-  "function updateDocumentMemo(uint256 _tokenId, string _newMemo) external"
+  "function updateDocumentMemo(uint256 _tokenId, string _newMemo) external",
+  // 添加事件定义 - 修正参数顺序以匹配合约
+  "event DocumentCreated(uint256 indexed tokenId, string documentId, string docUID, address indexed creator)",
+  "event TransferSingle(address indexed operator, address indexed from, address indexed to, uint256 id, uint256 value)"
 ];
 
 // 从环境变量获取合约地址
