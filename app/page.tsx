@@ -138,14 +138,9 @@ export default function MarkdownManagerPage() {
         
         const fileName = metadata.fileName || `Document #${nft.tokenId}`
         
-        // 添加版本号到文件名
-        const fileNameWithVersion = fileName.includes(' (v') 
-          ? fileName 
-          : `${fileName.replace(/\.md$/, '')} (v${currentVersion}).md`
-        
                  return {
           id: nft.tokenId.toString(),
-          name: fileNameWithVersion,
+          name: fileName,
           content: "", // 内容需要解密后才能获取
           latestVersionTimestamp: metadata.updatedAt || metadata.createdAt || nft.createdAt.toISOString(),
           versions: [{
@@ -389,13 +384,10 @@ export default function MarkdownManagerPage() {
         }
         
         const fileName = metadata.fileName || `Document #${nft.tokenId}`
-        const fileNameWithVersion = fileName.includes(' (v') 
-          ? fileName 
-          : `${fileName.replace(/\.md$/, '')} (v${currentVersion}).md`
         
         const updatedFile = {
           ...selectedFile,
-          name: fileNameWithVersion,
+          name: fileName,
           content: decryptResult.content,
           latestVersionTimestamp: metadata.updatedAt || metadata.createdAt || nft.createdAt.toISOString()
         }
@@ -407,9 +399,13 @@ export default function MarkdownManagerPage() {
         
         toast({
           title: "Document reloaded",
-          description: `Now viewing version ${currentVersion}`,
+          description: "Document content has been refreshed",
           variant: "default"
         })
+
+        // 刷新文件列表以反映可能的版本变更（比如restore操作）
+        setHasInitialLoad(false) // 重置初始化状态，允许重新加载
+        await loadUserDocuments()
       }
     } catch (error) {
       console.error('Failed to reload document:', error)
