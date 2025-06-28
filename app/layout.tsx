@@ -1,15 +1,23 @@
 import type React from "react"
 import type { Metadata } from "next"
-import { Inter } from "next/font/google"
+import { Geist, Geist_Mono } from "next/font/google"
 import "./globals.css"
 import { ThemeProvider } from "@/components/theme-provider"
+import { WalletProvider } from "@/hooks/use-wallet"
 
-const inter = Inter({ subsets: ["latin"] })
+const geist = Geist({
+  subsets: ["latin"],
+  variable: "--font-geist-sans",
+})
+
+const geistMono = Geist_Mono({
+  subsets: ["latin"],
+  variable: "--font-geist-mono",
+})
 
 export const metadata: Metadata = {
-  title: "Web3 Encrypted Markdown Manager",
-  description: "Manage your encrypted Markdown files on Web3",
-    generator: 'v0.dev'
+  title: "BlueDocs - Web3 Encrypted Document Manager",
+  description: "Secure, encrypted document management on the blockchain",
 }
 
 export default function RootLayout({
@@ -19,9 +27,18 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en" suppressHydrationWarning>
-      <body className={inter.className}>
-        <ThemeProvider attribute="class" defaultTheme="system" enableSystem disableTransitionOnChange>
-          {children}
+      <body
+        className={`${geist.variable} ${geistMono.variable} antialiased`}
+      >
+        <ThemeProvider
+          attribute="class"
+          defaultTheme="system"
+          enableSystem
+          disableTransitionOnChange
+        >
+          <WalletProvider>
+            {children}
+          </WalletProvider>
         </ThemeProvider>
       </body>
     </html>

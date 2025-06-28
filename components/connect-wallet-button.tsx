@@ -1,16 +1,25 @@
 "use client"
 
 import { Button } from "@/components/ui/button"
-import { LogIn, LogOut, Wallet } from "lucide-react"
+import { LogIn, LogOut, Wallet, Loader2, AlertCircle } from "lucide-react"
 
 interface ConnectWalletButtonProps {
   isConnected: boolean
   walletAddress: string | null
   onConnect: () => void
   onDisconnect: () => void
+  isLoading?: boolean
+  error?: string
 }
 
-export function ConnectWalletButton({ isConnected, walletAddress, onConnect, onDisconnect }: ConnectWalletButtonProps) {
+export function ConnectWalletButton({ 
+  isConnected, 
+  walletAddress, 
+  onConnect, 
+  onDisconnect, 
+  isLoading = false,
+  error 
+}: ConnectWalletButtonProps) {
   if (isConnected) {
     return (
       <div className="flex items-center gap-2">
@@ -27,9 +36,21 @@ export function ConnectWalletButton({ isConnected, walletAddress, onConnect, onD
   }
 
   return (
-    <Button onClick={onConnect}>
-      <LogIn className="h-4 w-4 mr-2" />
-      Connect Wallet
-    </Button>
+    <div className="flex flex-col items-end gap-1">
+      <Button onClick={onConnect} disabled={isLoading}>
+        {isLoading ? (
+          <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+        ) : (
+          <LogIn className="h-4 w-4 mr-2" />
+        )}
+        {isLoading ? 'Connecting...' : 'Connect Wallet'}
+      </Button>
+      {error && (
+        <div className="flex items-center gap-1 text-xs text-red-500">
+          <AlertCircle className="h-3 w-3" />
+          <span>{error}</span>
+        </div>
+      )}
+    </div>
   )
 }

@@ -10,6 +10,7 @@ import { HistoryViewer } from "@/components/history-viewer"
 import { Badge } from "@/components/ui/badge"
 import { History, UploadCloud, Loader2, Share2, ArrowLeft } from "lucide-react"
 import type { FileData } from "@/app/page"
+import type { NFTInfo } from "@/lib/contract"
 import { ShareDialog } from "@/components/share-dialog"
 
 interface EditorPaneProps {
@@ -18,11 +19,13 @@ interface EditorPaneProps {
   isNew: boolean
   isMobile: boolean
   onBack: () => void
+  nft?: NFTInfo | null
+  onReloadFile?: () => void // 重新加载文件内容的回调
 }
 
 type ButtonState = "idle" | "encrypting" | "uploading" | "saving" | "success" | "error"
 
-export function EditorPane({ file, onUpdateFile, isNew, isMobile, onBack }: EditorPaneProps) {
+export function EditorPane({ file, onUpdateFile, isNew, isMobile, onBack, nft, onReloadFile }: EditorPaneProps) {
   const [fileName, setFileName] = useState(file.name)
   const [markdownContent, setMarkdownContent] = useState(file.content)
   const [isHistoryOpen, setIsHistoryOpen] = useState(false)
@@ -86,7 +89,8 @@ export function EditorPane({ file, onUpdateFile, isNew, isMobile, onBack }: Edit
       case "encrypting":
         return (
           <>
-            <Loader2 className="h-4 w-4 mr-2 animate-spin" /> Encrypting...
+            <Loader2 className="h-4 w-4 mr-2 animate-spin" /> 
+            {isNew ? "Publishing..." : "Updating..."}
           </>
         )
       case "uploading":
@@ -195,8 +199,9 @@ export function EditorPane({ file, onUpdateFile, isNew, isMobile, onBack }: Edit
       <HistoryViewer
         isOpen={isHistoryOpen}
         onOpenChange={setIsHistoryOpen}
-        versions={file.versions}
+        nft={nft || null}
         fileName={fileName}
+        onVersionRestored={onReloadFile}
       />
       <ShareDialog
         isOpen={isShareDialogOpen}

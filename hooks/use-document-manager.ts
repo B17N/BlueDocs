@@ -10,7 +10,8 @@ import {
   updateDocumentMemo,
   type NFTInfo,
   type DocMemoData,
-  type DocumentMetadataForNFT
+  type DocumentMetadataForNFT,
+  type DocumentVersion
 } from '@/lib/contract';
 import { 
   generateDocumentMetadata, 
@@ -20,7 +21,7 @@ import {
   extractTitle,
   type DocumentMetadata 
 } from '@/lib/document-utils';
-import { useWallet } from './use-wallet';
+import { useWallet, type WalletState } from './use-wallet';
 
 /**
  * 文档加密和上传结果
@@ -30,8 +31,11 @@ export interface DocumentUploadResult {
   encryptionKey: string;
   nonce: string;
   encryptedKeys?: {
-    encryptedKey: string;
-    encryptedNonce: string;
+    // 新格式：合并的Key和Nonce加密
+    encryptedCombined?: string;
+    // 旧格式：分别加密（向后兼容）
+    encryptedKey?: string;
+    encryptedNonce?: string;
   };
 }
 
@@ -62,6 +66,13 @@ export interface OperationState {
  */
 export const useDocumentManager = () => {
   const wallet = useWallet();
+
+  console.log('[DOCUMENT_MANAGER] Initializing with wallet state:', {
+    isConnected: wallet.isConnected,
+    hasPublicKey: !!wallet.publicKey,
+    address: wallet.address ? wallet.address.substring(0, 8) + '...' : 'none',
+    timestamp: new Date().toISOString()
+  });
   
   // 状态管理
   const [uploadState, setUploadState] = useState<OperationState>({
@@ -95,6 +106,15 @@ export const useDocumentManager = () => {
     content: string,
     useMetaMaskEncryption: boolean = true
   ): Promise<DocumentUploadResult> => {
+    console.log('[ENCRYPT_AND_UPLOAD_START]', {
+      useMetaMaskEncryption,
+      walletConnected: wallet.isConnected,
+      hasPublicKey: !!wallet.publicKey,
+      publicKeyLength: wallet.publicKey?.length || 0,
+      walletAddress: wallet.address ? wallet.address.substring(0, 8) + '...' : 'none',
+      timestamp: new Date().toISOString()
+    });
+
     if (!content.trim()) {
       throw new Error('Document content cannot be empty');
     }
@@ -111,14 +131,23 @@ export const useDocumentManager = () => {
       
       let encryptedKeys;
       if (useMetaMaskEncryption && wallet.publicKey) {
-        // 2. 使用 MetaMask 加密密钥和 nonce
-        const encryptedKey = await encryptWithMetaMask(key, wallet.publicKey);
-        const encryptedNonce = await encryptWithMetaMask(nonce, wallet.publicKey);
+        console.log('[ENCRYPT_AND_UPLOAD] Using MetaMask encryption with combined format', {
+          publicKeyExists: !!wallet.publicKey,
+          timestamp: new Date().toISOString()
+        });
+        
+        // 2. 将Key和Nonce合并为一个JSON对象，然后用MetaMask加密（新格式）
+        const combinedKeys = JSON.stringify({ key, nonce });
+        const encryptedCombined = await encryptWithMetaMask(combinedKeys, wallet.publicKey);
         
         encryptedKeys = {
-          encryptedKey,
-          encryptedNonce
+          encryptedCombined
         };
+      } else if (useMetaMaskEncryption && !wallet.publicKey) {
+        console.warn('[ENCRYPT_AND_UPLOAD] MetaMask encryption requested but no public key available', {
+          walletConnected: wallet.isConnected,
+          timestamp: new Date().toISOString()
+        });
       }
 
       // 3. 上传加密数据到 IPFS
@@ -127,8 +156,16 @@ export const useDocumentManager = () => {
         metadata: {
           encrypted: 'true',
           timestamp: new Date().toISOString(),
-          hasMetaMaskKeys: encryptedKeys ? 'true' : 'false'
+          hasMetaMaskKeys: encryptedKeys ? 'true' : 'false',
+          encryptionFormat: encryptedKeys ? 'combined' : 'plain'
         }
+      });
+
+      console.log('[ENCRYPT_AND_UPLOAD_SUCCESS]', {
+        ipfsHash: uploadResult.IpfsHash.substring(0, 20) + '...',
+        hasEncryptedKeys: !!encryptedKeys,
+        encryptionFormat: encryptedKeys ? 'combined' : 'plain',
+        timestamp: new Date().toISOString()
       });
 
       const result: DocumentUploadResult = {
@@ -142,6 +179,10 @@ export const useDocumentManager = () => {
       return result;
     } catch (err) {
       const error = err instanceof Error ? err.message : 'Upload failed';
+      console.error('[ENCRYPT_AND_UPLOAD_ERROR]', {
+        error,
+        timestamp: new Date().toISOString()
+      });
       setUploadState({ isLoading: false, error, success: false });
       throw err;
     }
@@ -211,7 +252,7 @@ export const useDocumentManager = () => {
     setDecryptState({ isLoading: true, error: '', success: false });
 
     try {
-      // 1. 使用 MetaMask 解密密钥和 nonce
+      // 1. 使用 MetaMask 解密密钥和 nonce（旧格式）
       const decryptedKey = await decryptWithMetaMask(encryptedKey, wallet.address);
       const decryptedNonce = await decryptWithMetaMask(encryptedNonce, wallet.address);
 
@@ -219,6 +260,39 @@ export const useDocumentManager = () => {
       return await downloadAndDecrypt(ipfsHash, decryptedKey, decryptedNonce);
     } catch (err) {
       const error = err instanceof Error ? err.message : 'MetaMask decryption failed';
+      setDecryptState({ isLoading: false, error, success: false });
+      throw err;
+    }
+  }, [wallet.isConnected, wallet.address, downloadAndDecrypt]);
+
+  /**
+   * 使用 MetaMask 解密合并的密钥后下载并解密文档（新格式）
+   * 
+   * @param ipfsHash - IPFS 文件哈希
+   * @param encryptedCombined - MetaMask 加密的合并密钥和nonce
+   * @returns 解密结果
+   */
+  const downloadAndDecryptWithMetaMaskCombined = useCallback(async (
+    ipfsHash: string,
+    encryptedCombined: string
+  ): Promise<DocumentDecryptResult> => {
+    if (!wallet.isConnected) {
+      throw new Error('Wallet must be connected for MetaMask decryption');
+    }
+
+    setDecryptState({ isLoading: true, error: '', success: false });
+
+    try {
+      // 1. 使用 MetaMask 解密合并的密钥（新格式，只需要一次确认）
+      const decryptedCombined = await decryptWithMetaMask(encryptedCombined, wallet.address);
+      
+      // 2. 解析出密钥和nonce
+      const { key: decryptedKey, nonce: decryptedNonce } = JSON.parse(decryptedCombined);
+
+      // 3. 下载并解密文档
+      return await downloadAndDecrypt(ipfsHash, decryptedKey, decryptedNonce);
+    } catch (err) {
+      const error = err instanceof Error ? err.message : 'MetaMask combined decryption failed';
       setDecryptState({ isLoading: false, error, success: false });
       throw err;
     }
@@ -250,11 +324,13 @@ export const useDocumentManager = () => {
       const docTitle = extractTitle(content, docType);
       const suggestedFileName = fileName || generateFileName(content, docType);
 
+      const now = new Date().toISOString();
       const metadata: DocumentMetadataForNFT = {
         fileName: suggestedFileName,
         fileType: docType,
         title: docTitle,
-        createdAt: new Date().toISOString(),
+        createdAt: now,
+        updatedAt: now,
         size: content.length,
         isVisible: true // 新创建的文档默认显示
       };
@@ -270,8 +346,17 @@ export const useDocumentManager = () => {
 
       setNftState({ isLoading: false, error: '', success: true });
       
-      // 刷新用户 NFT 列表
+      console.log('[CREATE_NFT_SUCCESS] NFT created, tx:', txHash);
+      console.log('[CREATE_NFT_SUCCESS] Current NFT count before refresh:', userNFTs.length);
+      
+      // 等待区块链状态同步，然后刷新用户 NFT 列表
+      // 添加延迟确保区块链状态完全同步到读取节点
+      console.log('[CREATE_NFT_SUCCESS] Waiting 1 second for blockchain sync...');
+      await new Promise(resolve => setTimeout(resolve, 1000)); // 减少到1秒
+      
+      console.log('[CREATE_NFT_SUCCESS] Starting to refresh NFT list...');
       await loadUserNFTs();
+      console.log('[CREATE_NFT_SUCCESS] NFT refresh completed, new count:', userNFTs.length);
       
       return txHash;
     } catch (err) {
@@ -307,24 +392,301 @@ export const useDocumentManager = () => {
   }, [encryptAndUpload, createDocumentNFT]);
 
   /**
-   * 加载用户拥有的所有 NFT
+   * 更新现有文档，添加新版本
+   * 
+   * @param nft - 要更新的 NFT 信息
+   * @param content - 新的文档内容
+   * @param fileName - 新的文件名（可选）
+   * @returns 交易哈希
    */
-  const loadUserNFTs = useCallback(async (): Promise<void> => {
+  const updateDocument = useCallback(async (
+    nft: NFTInfo,
+    content: string,
+    fileName?: string
+  ): Promise<string> => {
     if (!wallet.isConnected) {
-      setUserNFTs([]);
-      return;
+      throw new Error('Wallet must be connected to update document');
     }
 
     setNftState({ isLoading: true, error: '', success: false });
 
     try {
+      // 1. 加密并上传新内容
+      const uploadResult = await encryptAndUpload(content, true);
+
+      // 2. 解析当前 docMemo
+      const docMemoData = parseDocMemoData(nft.docMemo);
+      if (!docMemoData) {
+        throw new Error('Cannot parse document memo data');
+      }
+
+      // 3. 生成新版本元数据
+      const docType = detectDocumentType(content, fileName);
+      const docTitle = extractTitle(content, docType);
+      const suggestedFileName = fileName || docMemoData.metadata.fileName;
+      const now = new Date().toISOString();
+      
+      // 4. 处理版本控制（兼容旧格式）
+      let newVersionId: number;
+      let existingVersions: DocumentVersion[];
+      
+      if (docMemoData.versions && docMemoData.versions.length > 0) {
+        // 新格式：已有版本数组
+        existingVersions = docMemoData.versions;
+        newVersionId = Math.max(...docMemoData.versions.map(v => v.versionId)) + 1;
+      } else {
+        // 旧格式：需要从旧的加密信息创建第一个版本
+        const encryptionInfo = parseEncryptionInfoFromMemo(nft.docMemo);
+        if (encryptionInfo) {
+          const firstVersion: DocumentVersion = {
+            versionId: 1,
+            ipfsHash: nft.storageAddress,
+            timestamp: docMemoData.metadata.createdAt,
+            size: docMemoData.metadata.size || 0,
+            encryptedKey: encryptionInfo.key,
+            encryptedNonce: encryptionInfo.nonce
+          };
+          existingVersions = [firstVersion];
+          newVersionId = 2;
+        } else {
+          throw new Error('Cannot parse legacy encryption information');
+        }
+      }
+      const newVersion: DocumentVersion = {
+        versionId: newVersionId,
+        ipfsHash: uploadResult.ipfsHash,
+        timestamp: now,
+        size: content.length,
+        encryptedKey: uploadResult.encryptedKeys?.encryptedCombined 
+          ? uploadResult.encryptedKeys.encryptedCombined 
+          : (uploadResult.encryptedKeys?.encryptedKey || uploadResult.encryptionKey),
+        encryptedNonce: uploadResult.encryptedKeys?.encryptedCombined 
+          ? "COMBINED_FORMAT" // 特殊标记，表示使用合并格式
+          : (uploadResult.encryptedKeys?.encryptedNonce || uploadResult.nonce)
+      };
+
+      // 5. 更新 docMemo 数据
+      const updatedDocMemoData: DocMemoData = {
+        ...docMemoData,
+        metadata: {
+          ...docMemoData.metadata,
+          fileName: suggestedFileName,
+          title: docTitle,
+          updatedAt: now,
+          size: content.length
+        },
+        versions: [...existingVersions, newVersion],
+        currentVersion: newVersionId
+      };
+
+      // 6. 调用合约更新 docMemo
+      const txHash = await updateDocumentMemo(
+        nft.tokenId,
+        JSON.stringify(updatedDocMemoData),
+        wallet.address
+      );
+
+      console.log('Document updated successfully, tx:', txHash);
+
+      // 7. 更新本地状态
+      setUserNFTs(prevNFTs => 
+        prevNFTs.map(n => 
+          n.tokenId === nft.tokenId 
+            ? { ...n, docMemo: JSON.stringify(updatedDocMemoData) }
+            : n
+        )
+      );
+
+      setNftState({ isLoading: false, error: '', success: true });
+      return txHash;
+    } catch (err) {
+      const error = err instanceof Error ? err.message : 'Document update failed';
+      setNftState({ isLoading: false, error, success: false });
+      throw err;
+    }
+  }, [wallet.isConnected, wallet.address, encryptAndUpload]);
+
+  /**
+   * 恢复历史版本为最新版本
+   * 
+   * @param nft - NFT 信息
+   * @param versionId - 要恢复的版本 ID
+   * @returns 交易哈希
+   */
+  const restoreVersion = useCallback(async (
+    nft: NFTInfo,
+    versionId: number
+  ): Promise<string> => {
+    if (!wallet.isConnected) {
+      throw new Error('Wallet must be connected to restore version');
+    }
+
+    setNftState({ isLoading: true, error: '', success: false });
+
+    try {
+      // 1. 解析当前 docMemo
+      const docMemoData = parseDocMemoData(nft.docMemo);
+      if (!docMemoData) {
+        throw new Error('Cannot parse document memo data');
+      }
+
+      // 2. 找到要恢复的版本
+      const versionToRestore = docMemoData.versions.find(v => v.versionId === versionId);
+      if (!versionToRestore) {
+        throw new Error(`Version ${versionId} not found`);
+      }
+
+      // 3. 解密旧版本内容
+      const isCombinedFormat = versionToRestore.encryptedNonce === "COMBINED_FORMAT";
+      let decryptResult: DocumentDecryptResult;
+
+      if (isCombinedFormat) {
+        // 新格式：使用合并的密钥解密（只需要一次MetaMask确认）
+        if (!wallet.isConnected) {
+          throw new Error('Wallet must be connected to decrypt MetaMask-encrypted documents');
+        }
+        
+        decryptResult = await downloadAndDecryptWithMetaMaskCombined(
+          versionToRestore.ipfsHash,
+          versionToRestore.encryptedKey
+        );
+      } else {
+        // 旧格式：检查是否使用了 MetaMask 加密
+        const isMetaMaskEncrypted = versionToRestore.encryptedKey.startsWith('0x') && versionToRestore.encryptedKey.length > 100;
+        
+        if (isMetaMaskEncrypted) {
+          decryptResult = await downloadAndDecryptWithMetaMask(
+            versionToRestore.ipfsHash,
+            versionToRestore.encryptedKey,
+            versionToRestore.encryptedNonce
+          );
+        } else {
+          decryptResult = await downloadAndDecrypt(
+            versionToRestore.ipfsHash,
+            versionToRestore.encryptedKey,
+            versionToRestore.encryptedNonce
+          );
+        }
+      }
+
+      // 4. 重新加密并上传内容
+      const uploadResult = await encryptAndUpload(decryptResult.content, true);
+
+      // 5. 创建新版本（从旧版本恢复）
+      const newVersionId = Math.max(...docMemoData.versions.map(v => v.versionId)) + 1;
+      const now = new Date().toISOString();
+      
+      const newVersion: DocumentVersion = {
+        versionId: newVersionId,
+        ipfsHash: uploadResult.ipfsHash,
+        timestamp: now,
+        size: decryptResult.content.length,
+        encryptedKey: uploadResult.encryptedKeys?.encryptedCombined 
+          ? uploadResult.encryptedKeys.encryptedCombined 
+          : (uploadResult.encryptedKeys?.encryptedKey || uploadResult.encryptionKey),
+        encryptedNonce: uploadResult.encryptedKeys?.encryptedCombined 
+          ? "COMBINED_FORMAT" // 特殊标记，表示使用合并格式
+          : (uploadResult.encryptedKeys?.encryptedNonce || uploadResult.nonce)
+      };
+
+      // 6. 更新 docMemo 数据
+      const updatedDocMemoData: DocMemoData = {
+        ...docMemoData,
+        metadata: {
+          ...docMemoData.metadata,
+          updatedAt: now,
+          size: decryptResult.content.length
+        },
+        versions: [...docMemoData.versions, newVersion],
+        currentVersion: newVersionId
+      };
+
+      // 7. 调用合约更新 docMemo
+      const txHash = await updateDocumentMemo(
+        nft.tokenId,
+        JSON.stringify(updatedDocMemoData),
+        wallet.address
+      );
+
+      console.log(`Version ${versionId} restored as version ${newVersionId}, tx:`, txHash);
+
+      // 8. 更新本地状态
+      setUserNFTs(prevNFTs => 
+        prevNFTs.map(n => 
+          n.tokenId === nft.tokenId 
+            ? { ...n, docMemo: JSON.stringify(updatedDocMemoData) }
+            : n
+        )
+      );
+
+      setNftState({ isLoading: false, error: '', success: true });
+      return txHash;
+    } catch (err) {
+      const error = err instanceof Error ? err.message : 'Version restore failed';
+      setNftState({ isLoading: false, error, success: false });
+      throw err;
+    }
+  }, [wallet.isConnected, wallet.address, encryptAndUpload, downloadAndDecrypt, downloadAndDecryptWithMetaMask, downloadAndDecryptWithMetaMaskCombined]);
+
+  /**
+   * 获取文档的版本历史
+   * 
+   * @param nft - NFT 信息
+   * @returns 版本历史数组
+   */
+  const getVersionHistory = useCallback((nft: NFTInfo): DocumentVersion[] => {
+    const docMemoData = parseDocMemoData(nft.docMemo);
+    if (docMemoData && docMemoData.versions) {
+      // 新格式：按版本号倒序排列（最新版本在前）
+      return [...docMemoData.versions].sort((a, b) => b.versionId - a.versionId);
+    } else {
+      // 兼容旧格式：创建一个虚拟的版本历史
+      const encryptionInfo = parseEncryptionInfoFromMemo(nft.docMemo);
+      if (encryptionInfo) {
+        return [{
+          versionId: 1,
+          ipfsHash: nft.storageAddress,
+          timestamp: nft.createdAt.toISOString(),
+          size: 0, // 旧格式没有大小信息
+          encryptedKey: encryptionInfo.key,
+          encryptedNonce: encryptionInfo.nonce
+        }];
+      }
+    }
+    return [];
+  }, []);
+
+  /**
+   * 加载用户拥有的所有 NFT
+   */
+  const loadUserNFTs = useCallback(async (): Promise<NFTInfo[]> => {
+    if (!wallet.isConnected) {
+      console.log('[LOAD_USER_NFTS] Wallet not connected, clearing NFTs');
+      setUserNFTs([]);
+      return [];
+    }
+
+    console.log('[LOAD_USER_NFTS] Starting to load NFTs for address:', wallet.address);
+    console.log('[LOAD_USER_NFTS] Current NFT count before load:', userNFTs.length);
+    
+    setNftState({ isLoading: true, error: '', success: false });
+
+    try {
       const nfts = await getUserNFTs(wallet.address);
+      console.log('[LOAD_USER_NFTS] getUserNFTs returned:', nfts.length, 'NFTs');
+      console.log('[LOAD_USER_NFTS] NFT tokenIds:', nfts.map(n => n.tokenId));
+      
       setUserNFTs(nfts);
       setNftState({ isLoading: false, error: '', success: true });
+      
+      console.log('[LOAD_USER_NFTS] Successfully updated userNFTs state with:', nfts.length, 'NFTs');
+      return nfts; // 返回NFT列表
     } catch (err) {
       const error = err instanceof Error ? err.message : 'Failed to load NFTs';
+      console.error('[LOAD_USER_NFTS] Error loading NFTs:', error);
       setNftState({ isLoading: false, error, success: false });
       setUserNFTs([]);
+      return [];
     }
   }, [wallet.isConnected, wallet.address]);
 
@@ -337,35 +699,87 @@ export const useDocumentManager = () => {
   const decryptDocumentFromNFT = useCallback(async (
     nft: NFTInfo
   ): Promise<DocumentDecryptResult> => {
+    console.log('Decrypting NFT:', nft.tokenId, 'memo length:', nft.docMemo.length);
+    
     // 尝试解析新格式的 docMemo
     const docMemoData = parseDocMemoData(nft.docMemo);
     
-    if (docMemoData) {
-      const { encryption } = docMemoData;
+    if (docMemoData && docMemoData.versions && docMemoData.versions.length > 0) {
+      // 新格式：从版本数组中获取当前版本的加密信息
+      const currentVersionData = docMemoData.versions.find(v => v.versionId === docMemoData.currentVersion) 
+        || docMemoData.versions[docMemoData.versions.length - 1]; // 如果找不到当前版本，使用最后一个版本
+
+      // 检查是否使用了合并格式（新格式）
+      const isCombinedFormat = currentVersionData.encryptedNonce === "COMBINED_FORMAT";
       
-      if (encryption.method === 'metamask') {
-        // 使用 MetaMask 解密
+      if (isCombinedFormat) {
+        // 新格式：使用合并的密钥解密（只需要一次MetaMask确认）
         if (!wallet.isConnected) {
           throw new Error('Wallet must be connected to decrypt MetaMask-encrypted documents');
         }
         
-        return await downloadAndDecryptWithMetaMask(
-          nft.storageAddress,
-          encryption.encryptedKey,
-          encryption.encryptedNonce
+        return await downloadAndDecryptWithMetaMaskCombined(
+          currentVersionData.ipfsHash,
+          currentVersionData.encryptedKey
         );
       } else {
-        // 使用明文密钥解密（兼容旧格式）
-        return await downloadAndDecrypt(
-          nft.storageAddress,
-          encryption.encryptedKey,
-          encryption.encryptedNonce
-        );
+        // 旧格式：检查是否使用了 MetaMask 加密（通过密钥长度判断）
+        const isMetaMaskEncrypted = currentVersionData.encryptedKey.startsWith('0x') && currentVersionData.encryptedKey.length > 100;
+        
+        if (isMetaMaskEncrypted) {
+          // 使用 MetaMask 解密（需要两次确认）
+          if (!wallet.isConnected) {
+            throw new Error('Wallet must be connected to decrypt MetaMask-encrypted documents');
+          }
+          
+          return await downloadAndDecryptWithMetaMask(
+            currentVersionData.ipfsHash,
+            currentVersionData.encryptedKey,
+            currentVersionData.encryptedNonce
+          );
+        } else {
+          // 使用明文密钥解密
+          return await downloadAndDecrypt(
+            currentVersionData.ipfsHash,
+            currentVersionData.encryptedKey,
+            currentVersionData.encryptedNonce
+          );
+        }
       }
     } else {
-      throw new Error('Cannot parse document information from NFT memo');
+      // 兼容旧格式：直接从 parseEncryptionInfoFromMemo 获取加密信息
+      console.log('Trying legacy format parsing...');
+      const encryptionInfo = parseEncryptionInfoFromMemo(nft.docMemo);
+      console.log('Parsed encryption info:', encryptionInfo);
+      
+      if (encryptionInfo) {
+        // 检查是否使用了 MetaMask 加密
+        const isMetaMaskEncrypted = encryptionInfo.key.startsWith('0x') && encryptionInfo.key.length > 100;
+        
+        if (isMetaMaskEncrypted) {
+          // 使用 MetaMask 解密
+          if (!wallet.isConnected) {
+            throw new Error('Wallet must be connected to decrypt MetaMask-encrypted documents');
+          }
+          
+          return await downloadAndDecryptWithMetaMask(
+            nft.storageAddress,
+            encryptionInfo.key,
+            encryptionInfo.nonce
+          );
+        } else {
+          // 使用明文密钥解密
+          return await downloadAndDecrypt(
+            nft.storageAddress,
+            encryptionInfo.key,
+            encryptionInfo.nonce
+          );
+        }
+      } else {
+        throw new Error('Cannot parse document information from NFT memo');
+      }
     }
-  }, [downloadAndDecrypt, downloadAndDecryptWithMetaMask, wallet.isConnected]);
+  }, [downloadAndDecrypt, downloadAndDecryptWithMetaMask, downloadAndDecryptWithMetaMaskCombined, wallet.isConnected]);
 
   /**
    * 从 NFT 信息中获取文档元数据
@@ -374,18 +788,25 @@ export const useDocumentManager = () => {
    * @returns 文档元数据，如果解析失败则返回默认值
    */
   const getDocumentMetadataFromNFT = useCallback((nft: NFTInfo): DocumentMetadataForNFT => {
+    console.log(`[GET_METADATA] Processing NFT ${nft.tokenId}, docMemo length: ${nft.docMemo.length}`);
+    
     const docMemoData = parseDocMemoData(nft.docMemo);
+    console.log(`[GET_METADATA] NFT ${nft.tokenId} parseDocMemoData result:`, !!docMemoData);
     
     if (docMemoData && docMemoData.metadata) {
+      console.log(`[GET_METADATA] NFT ${nft.tokenId} using parsed metadata, isVisible: ${docMemoData.metadata.isVisible}`);
       return docMemoData.metadata;
     }
     
     // 兼容旧格式，返回默认值
+    console.log(`[GET_METADATA] NFT ${nft.tokenId} using fallback metadata (legacy), isVisible: true`);
+    const timestamp = nft.createdAt.toISOString();
     return {
       fileName: `Document-${nft.tokenId}.md`,
       fileType: 'markdown',
       title: `Document #${nft.tokenId}`,
-      createdAt: nft.createdAt.toISOString(),
+      createdAt: timestamp,
+      updatedAt: timestamp,
       size: 0,
       isVisible: true // 旧格式默认显示
     };
@@ -513,10 +934,26 @@ export const useDocumentManager = () => {
    * @returns 可见的 NFT 列表
    */
   const getVisibleNFTs = useCallback((): NFTInfo[] => {
-    return userNFTs.filter(nft => {
+    console.log('[GET_VISIBLE_NFTS] Starting to filter', userNFTs.length, 'NFTs');
+    
+    const visibleNFTs = userNFTs.filter((nft, index) => {
       const metadata = getDocumentMetadataFromNFT(nft);
-      return metadata.isVisible;
+      const isVisible = metadata.isVisible;
+      
+      console.log(`[GET_VISIBLE_NFTS] NFT ${nft.tokenId}: isVisible = ${isVisible}, fileName = ${metadata.fileName}`);
+      
+      if (!isVisible) {
+        console.log(`[GET_VISIBLE_NFTS] NFT ${nft.tokenId} FILTERED OUT (not visible)`);
+        console.log(`[GET_VISIBLE_NFTS] NFT ${nft.tokenId} docMemo preview:`, nft.docMemo.substring(0, 200));
+      }
+      
+      return isVisible;
     });
+    
+    console.log('[GET_VISIBLE_NFTS] Filtered result:', visibleNFTs.length, 'visible NFTs');
+    console.log('[GET_VISIBLE_NFTS] Visible tokenIds:', visibleNFTs.map(n => n.tokenId));
+    
+    return visibleNFTs;
   }, [userNFTs, getDocumentMetadataFromNFT]);
 
   /**
@@ -554,6 +991,7 @@ export const useDocumentManager = () => {
     encryptAndUpload,
     downloadAndDecrypt,
     downloadAndDecryptWithMetaMask,
+    downloadAndDecryptWithMetaMaskCombined,
     createDocumentNFT,
     publishDocument,
     
@@ -565,6 +1003,11 @@ export const useDocumentManager = () => {
     getHiddenNFTs,
     markDocumentAsHidden,
     restoreDocumentVisibility,
+    
+    // 版本控制相关
+    updateDocument,
+    restoreVersion,
+    getVersionHistory,
     
     // 工具函数
     resetStates,

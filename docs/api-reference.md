@@ -58,6 +58,11 @@ const {
   // NFT functions
   loadUserNFTs,
   decryptDocumentFromNFT,
+  getDocumentMetadataFromNFT,
+  getVisibleNFTs,
+  getHiddenNFTs,
+  markDocumentAsHidden,
+  restoreDocumentVisibility,
   
   // Utilities
   resetStates,
@@ -112,18 +117,38 @@ const data = await downloadFromIPFS(ipfsHash);
 ### Smart Contract
 
 ```typescript
-import { mintDocumentFromIPFS, getUserNFTs } from '@/lib';
+import { 
+  mintDocumentFromIPFS, 
+  getUserNFTs, 
+  updateDocumentMemo,
+  parseDocMemoData 
+} from '@/lib';
 
 // Create document NFT
 const txHash = await mintDocumentFromIPFS(
   ipfsHash,
   encryptionKey,
   nonce,
-  walletAddress
+  walletAddress,
+  metadata,
+  encryptedKeys
 );
 
 // Get user's NFTs
 const nfts = await getUserNFTs(walletAddress);
+
+// Update document memo (for soft delete or other updates)
+const updateTxHash = await updateDocumentMemo(
+  tokenId,
+  newMemoString,
+  walletAddress
+);
+
+// Parse structured memo data
+const docData = parseDocMemoData(nft.docMemo);
+if (docData) {
+  console.log(docData.metadata.fileName, docData.metadata.isVisible);
+}
 ```
 
 ## Complete Workflows
@@ -136,12 +161,17 @@ const documentManager = useDocumentManager();
 // Method 1: One-step publish
 const result = await documentManager.publishDocument(
   "# My Document\n\nContent here...",
-  true // Create NFT
+  true, // Create NFT
+  "my-document.md" // Optional filename
 );
 
 // Method 2: Step-by-step
 const uploadResult = await documentManager.encryptAndUpload(content);
-const txHash = await documentManager.createDocumentNFT(uploadResult);
+const txHash = await documentManager.createDocumentNFT(
+  uploadResult,
+  content,
+  "my-document.md" // Optional filename
+);
 ```
 
 ### Reading a Document
@@ -165,6 +195,22 @@ const document = await documentManager.downloadAndDecryptWithMetaMask(
   encryptedKey,
   encryptedNonce
 );
+
+// Method 4: Get document metadata from NFT
+const metadata = documentManager.getDocumentMetadataFromNFT(nft);
+console.log(metadata.fileName, metadata.title, metadata.fileType);
+
+// Method 5: Get only visible documents (filter out soft-deleted)
+const visibleNFTs = documentManager.getVisibleNFTs();
+
+// Method 6: Get hidden documents (soft-deleted)
+const hiddenNFTs = documentManager.getHiddenNFTs();
+
+// Method 7: Soft delete a document (updates blockchain)
+await documentManager.markDocumentAsHidden(nft);
+
+// Method 8: Restore a hidden document (updates blockchain)
+await documentManager.restoreDocumentVisibility(nft);
 ```
 
 ## Document Utilities
@@ -244,6 +290,31 @@ interface DocumentDecryptResult {
 }
 ```
 
+### DocumentMetadataForNFT
+```typescript
+interface DocumentMetadataForNFT {
+  fileName: string;
+  fileType: string;
+  title: string;
+  createdAt: string;
+  size: number;
+  isVisible: boolean; // 用于实现假删除功能
+}
+```
+
+### DocMemoData
+```typescript
+interface DocMemoData {
+  version: string;
+  metadata: DocumentMetadataForNFT;
+  encryption: {
+    encryptedKey: string;
+    encryptedNonce: string;
+    method: string; // "metamask" | "plaintext"
+  };
+}
+```
+
 ### NFTInfo
 ```typescript
 interface NFTInfo {
@@ -253,11 +324,85 @@ interface NFTInfo {
   docUID: string;
   rootDocumentId: string;
   storageAddress: string;
-  docMemo: string;
+  docMemo: string; // Now contains structured JSON data
   createdAt: Date;
   creator: string;
 }
 ```
+
+## DocMemo Format (v1.0)
+
+The new structured docMemo format provides enhanced metadata and security:
+
+### Structure
+```json
+{
+  "version": "1.0",
+  "metadata": {
+    "fileName": "document.md",
+    "fileType": "markdown",
+    "title": "Document Title",
+    "createdAt": "2024-01-01T00:00:00Z",
+    "size": 1024,
+    "isVisible": true
+  },
+  "encryption": {
+    "encryptedKey": "metamask_encrypted_key",
+    "encryptedNonce": "metamask_encrypted_nonce",
+    "method": "metamask"
+  }
+}
+```
+
+### Features
+- **Structured metadata**: File name, type, title, creation time, size, and visibility flag
+- **MetaMask encryption**: Encryption keys are encrypted with user's public key
+- **Soft delete support**: `isVisible` field enables soft deletion without losing blockchain data
+- **Backward compatibility**: Automatically handles old format docMemos
+- **Version tracking**: Format version for future upgrades
+
+### Parsing Functions
+```typescript
+import { parseDocMemoData, parseEncryptionInfoFromMemo } from '@/lib';
+
+// Parse new format
+const docData = parseDocMemoData(nft.docMemo);
+if (docData) {
+  console.log(docData.metadata.fileName);
+  console.log(docData.encryption.method);
+}
+
+// Legacy compatibility
+const encryptionInfo = parseEncryptionInfoFromMemo(nft.docMemo);
+```
+
+## Soft Delete Feature
+
+Since blockchain data cannot be truly deleted, BlueDocs implements a soft delete mechanism:
+
+### Usage
+```typescript
+// Get only visible documents (recommended for UI)
+const visibleDocuments = documentManager.getVisibleNFTs();
+
+// Soft delete a document
+await documentManager.markDocumentAsHidden(nft);
+
+// Check if a document is visible
+const metadata = documentManager.getDocumentMetadataFromNFT(nft);
+if (metadata.isVisible) {
+  // Show in UI
+} else {
+  // Hidden from normal view
+}
+```
+
+### Important Notes
+- **Blockchain persistence**: Updates are written to the blockchain via smart contract
+- **Gas costs**: Each hide/restore operation requires a blockchain transaction and gas fees
+- **Authorization**: Only NFT owners can hide/restore their documents
+- **Data preservation**: Hidden documents remain on blockchain and can always be recovered
+- **Real-time updates**: Changes are immediately reflected across all sessions
 
 ## Configuration Check
 
