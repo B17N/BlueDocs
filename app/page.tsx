@@ -206,13 +206,19 @@ export default function MarkdownManagerPage() {
     let mounted = true
 
     const loadDocuments = async () => {
-      if (isWalletConnected && walletAddress && !documentManager.isAnyLoading) {
+      if (isWalletConnected && walletAddress) {
         console.log('Loading documents - wallet connected:', isWalletConnected, 'address:', walletAddress)
         console.log('hasInitialLoad:', hasInitialLoad, 'files count:', files.length)
         
         // 如果已经有文件且不是初次加载，跳过
         if (hasInitialLoad && files.length > 0) {
           console.log('Skipping load - already have files and initial load completed')
+          return
+        }
+        
+        // 检查是否正在加载，避免重复请求
+        if (documentManager.isAnyLoading) {
+          console.log('Document manager is already loading, skipping...')
           return
         }
         
@@ -245,7 +251,7 @@ export default function MarkdownManagerPage() {
       mounted = false
       clearTimeout(timeoutId)
     }
-  }, [isWalletConnected, walletAddress, documentManager.isAnyLoading])
+  }, [isWalletConnected, walletAddress])
 
   // 监听 MetaMask 账户切换
   useEffect(() => {
@@ -330,27 +336,7 @@ export default function MarkdownManagerPage() {
   }
 
   const handleNewFile = () => {
-    const defaultContent = `# New Document
-
-Welcome to BlueDocs! This is your new encrypted Markdown document.
-
-## Getting Started
-
-Start writing your content here. Your document will be:
-
-- 🔐 **Encrypted** locally in your browser
-- 📦 **Stored** on IPFS (decentralized storage)
-- 🔗 **Linked** to your wallet via NFT on Optimism blockchain
-
-## Features
-
-- **Privacy First**: Only you can decrypt your documents
-- **Version Control**: Every update creates a new version
-- **Decentralized**: No central server, your data is truly yours
-
----
-
-Start typing to begin...`
+    const defaultContent = `Start writing...`
 
     const newFile: FileData = {
       id: `new-${Date.now()}`,

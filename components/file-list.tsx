@@ -42,9 +42,54 @@ export function FileList({ files, selectedFileId, onSelectFile, onNewFile, onRef
         )}
       </div>
       {sortedFiles.length === 0 && !isRefreshing && (
-        <p className="text-sm text-muted-foreground">
-          No documents found. Create your first encrypted document!
-        </p>
+        <div className="flex-1 p-6">
+          <div className="max-w-md mx-auto space-y-4 text-sm">
+            <div className="text-center">
+              <h3 className="font-semibold text-foreground mb-2">Welcome to BlueDocs! 👋</h3>
+              <p className="text-muted-foreground">This is your new encrypted Markdown document.</p>
+            </div>
+            
+            <div className="space-y-3">
+              <div>
+                <h4 className="font-medium text-foreground mb-2">## Getting Started</h4>
+                <p className="text-muted-foreground mb-3">Start writing your content here. Your document will be:</p>
+                <ul className="space-y-2 text-muted-foreground">
+                  <li className="flex items-start">
+                    <span className="mr-2">🔐</span>
+                    <span><strong className="text-foreground">Encrypted</strong> locally in your browser</span>
+                  </li>
+                  <li className="flex items-start">
+                    <span className="mr-2">📦</span>
+                    <span><strong className="text-foreground">Stored</strong> on IPFS (decentralized storage)</span>
+                  </li>
+                  <li className="flex items-start">
+                    <span className="mr-2">🔗</span>
+                    <span><strong className="text-foreground">Linked</strong> to your wallet via NFT on Optimism blockchain</span>
+                  </li>
+                </ul>
+              </div>
+
+              <div>
+                <h4 className="font-medium text-foreground mb-2">## Features</h4>
+                <ul className="space-y-2 text-muted-foreground">
+                  <li className="flex items-start">
+                    <span className="mr-2">•</span>
+                    <span><strong className="text-foreground">Privacy First</strong>: Only you can decrypt your documents</span>
+                  </li>
+                  <li className="flex items-start">
+                    <span className="mr-2">•</span>
+                    <span><strong className="text-foreground">Version Control</strong>: Every update creates a new version</span>
+                  </li>
+                  <li className="flex items-start">
+                    <span className="mr-2">•</span>
+                    <span><strong className="text-foreground">Decentralized</strong>: No central server, your data is truly yours</span>
+                  </li>
+                </ul>
+              </div>
+
+            </div>
+          </div>
+        </div>
       )}
       <ScrollArea className="flex-1">
         <ul>
