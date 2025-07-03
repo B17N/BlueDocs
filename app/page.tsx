@@ -4,13 +4,10 @@ import { useState, useEffect } from "react"
 import { FileList } from "@/components/file-list"
 import { EditorPane } from "@/components/editor-pane"
 import { ConnectWalletButton } from "@/components/connect-wallet-button"
-import { LayoutPanelLeft, Edit3, HelpCircle } from "lucide-react" // Removed Smartphone icon as it's no longer used
+import { LayoutPanelLeft, Edit3, HelpCircle } from "lucide-react"
 import { useMediaQuery } from "@/hooks/use-media-query"
-import { useWallet } from "@/hooks/use-wallet"
-import { useDocumentManager } from "@/hooks/use-document-manager"
-import { Toaster } from "@/components/ui/toaster"
-import { useToast } from "@/hooks/use-toast"
-import { parseDocMemoData } from "@/lib/contract"
+import { Toaster } from "@/components/ui/sonner"
+import { toast } from "sonner"
 
 export interface FileData {
   id: string
@@ -18,10 +15,7 @@ export interface FileData {
   content: string
   versions: FileVersion[]
   latestVersionTimestamp: string
-  tokenId?: number
-  ipfsHash?: string
-  encryptionKey?: string
-  nonce?: string
+  isDeleted?: boolean
 }
 
 export interface FileVersion {
@@ -46,6 +40,7 @@ const mockFiles: FileData[] = [
       },
       { cid: "QmXyY", txHash: "0xdef", timestamp: "2024-06-21T14:30:00Z", content: "# Hello\n\nOld version." },
     ],
+    isDeleted: false,
   },
   {
     id: "2",
@@ -60,450 +55,143 @@ const mockFiles: FileData[] = [
         content: "## Brainstorming\n\n- Idea 1\n- Idea 2",
       },
     ],
+    isDeleted: false,
+  },
+  {
+    id: "3",
+    name: "Archived Thoughts.md",
+    content: "Some old ideas.",
+    latestVersionTimestamp: "2024-06-20T11:00:00Z",
+    versions: [],
+    isDeleted: true,
   },
 ]
 
 export default function MarkdownManagerPage() {
-  const [files, setFiles] = useState<FileData[]>([])
+  const [files, setFiles] = useState<FileData[]>(mockFiles)
   const [selectedFile, setSelectedFile] = useState<FileData | null>(null)
+  const [isWalletConnected, setIsWalletConnected] = useState(false)
+  const [walletAddress, setWalletAddress] = useState<string | null>(null)
   const [isEditingNewFile, setIsEditingNewFile] = useState(false)
-  const [isLoadingFiles, setIsLoadingFiles] = useState(false)
-  const [hasInitialLoad, setHasInitialLoad] = useState(false)
   const isMobile = useMediaQuery("(max-width: 768px)")
-  const { toast } = useToast()
-  
-  // Use the real wallet hook
-  const {
-    isConnected: isWalletConnected,
-    address: walletAddress,
-    publicKey,
-    isLoading: isWalletLoading,
-    error: walletError,
-    connectWallet,
-    disconnectWallet,
-    isMetaMaskInstalled
-  } = useWallet()
 
-  // Use the document manager hook
-  const documentManager = useDocumentManager()
-
-  // 加载用户的NFT文档
-  const loadUserDocuments = async () => {
-    if (!isWalletConnected || !walletAddress) {
-      console.log('Cannot load documents: wallet not connected')
-      return
-    }
-
-    if (documentManager.isAnyLoading) {
-      console.log('Document manager is already loading, skipping...')
-      return
-    }
-
-    console.log('[LOAD_USER_DOCS] Starting to load user documents...')
-    setIsLoadingFiles(true)
-    
-    try {
-      // 确保钱包状态稳定
-      await new Promise(resolve => setTimeout(resolve, 50))
-      
-      console.log('[LOAD_USER_DOCS] Current files count before loading:', files.length)
-      console.log('[LOAD_USER_DOCS] Current documentManager.userNFTs count:', documentManager.userNFTs.length)
-      
-            const loadedNFTs = await documentManager.loadUserNFTs()
-       
-       // 直接使用返回的NFTs而不是依赖状态
-       const visibleNFTs = loadedNFTs.filter(nft => {
-         const metadata = documentManager.getDocumentMetadataFromNFT(nft)
-         return metadata.isVisible
-       })
-       
-       console.log('[LOAD_USER_DOCS] After loadUserNFTs - total:', loadedNFTs.length, 'visible:', visibleNFTs.length)
-       console.log('[LOAD_USER_DOCS] Visible NFT tokenIds:', visibleNFTs.map(n => n.tokenId))
-      
-             // 将NFT转换为FileData格式
-       const fileDataList: FileData[] = visibleNFTs.map(nft => {
-         const docMemoData = parseDocMemoData(nft.docMemo)
-         const metadata = documentManager.getDocumentMetadataFromNFT(nft)
-        
-        // 获取版本信息
-        let currentVersion = 1
-        if (docMemoData && docMemoData.currentVersion) {
-          // 新格式：有明确的当前版本号
-          currentVersion = docMemoData.currentVersion
-        } else if (docMemoData && docMemoData.versions && docMemoData.versions.length > 0) {
-          // 新格式但缺少 currentVersion：使用最大版本号
-          currentVersion = Math.max(...docMemoData.versions.map(v => v.versionId))
-        }
-        // 旧格式：保持默认值 1
-        
-        const fileName = metadata.fileName || `Document #${nft.tokenId}`
-        
-                 return {
-          id: nft.tokenId.toString(),
-          name: fileName,
-          content: "", // 内容需要解密后才能获取
-          latestVersionTimestamp: metadata.updatedAt || metadata.createdAt || nft.createdAt.toISOString(),
-          versions: [{
-            cid: nft.storageAddress,
-            txHash: nft.docUID,
-            timestamp: metadata.updatedAt || metadata.createdAt || nft.createdAt.toISOString(),
-            content: ""
-          }],
-          tokenId: nft.tokenId,
-          ipfsHash: nft.storageAddress
-        }
-      })
-      
-      console.log('[LOAD_USER_DOCS] Converted to FileData:', fileDataList.length, 'files')
-      console.log('[LOAD_USER_DOCS] File names:', fileDataList.map(f => f.name))
-      console.log('[LOAD_USER_DOCS] File tokenIds:', fileDataList.map(f => f.tokenId))
-      
-      setFiles(fileDataList)
-      
-      // 如果有文件且在桌面模式，选择第一个
-      if (fileDataList.length > 0 && !isMobile && !selectedFile) {
-        setSelectedFile(fileDataList[0])
-      }
-      
-      console.log('[LOAD_USER_DOCS] Document loading completed:', fileDataList.length, 'files')
-      console.log('[LOAD_USER_DOCS] Updated files state, hasInitialLoad -> true')
-      setHasInitialLoad(true)
-    } catch (error) {
-      console.error('Failed to load documents:', error)
-      
-      // 更详细的错误信息
-      let errorMessage = "Unknown error"
-      if (error instanceof Error) {
-        errorMessage = error.message
-        if (error.message.includes('Cannot parse document information')) {
-          errorMessage = "Some documents could not be loaded. Please try refreshing."
-        }
-      }
-      
-      toast({
-        title: "Error loading documents",
-        description: errorMessage,
-        variant: "destructive"
-      })
-      
-             // 不要清空文件列表，让用户保留已有的数据
-       // setFiles([])
-       
-       // 即使失败也标记为已尝试加载，避免无限重试
-       setHasInitialLoad(true)
-     } finally {
-       setIsLoadingFiles(false)
-     }
-  }
-
-  // 当钱包连接状态改变时，加载文档
   useEffect(() => {
-    let mounted = true
-
-    const loadDocuments = async () => {
-      if (isWalletConnected && walletAddress) {
-        console.log('Loading documents - wallet connected:', isWalletConnected, 'address:', walletAddress)
-        console.log('hasInitialLoad:', hasInitialLoad, 'files count:', files.length)
-        
-        // 如果已经有文件且不是初次加载，跳过
-        if (hasInitialLoad && files.length > 0) {
-          console.log('Skipping load - already have files and initial load completed')
-          return
-        }
-        
-        // 检查是否正在加载，避免重复请求
-        if (documentManager.isAnyLoading) {
-          console.log('Document manager is already loading, skipping...')
-          return
-        }
-        
-        try {
-          await loadUserDocuments()
-        } catch (error) {
-          console.error('Failed to load documents in useEffect:', error)
-          if (mounted) {
-            toast({
-              title: "Failed to load documents",
-              description: "Please try refreshing the page",
-              variant: "destructive"
-            })
-          }
-        }
-      } else if (!isWalletConnected) {
-        console.log('Wallet disconnected, clearing files')
-        if (mounted) {
-          setFiles([])
-          setSelectedFile(null)
-          setHasInitialLoad(false)
-        }
-      }
+    if (isWalletConnected && files.length > 0 && !isMobile) {
+      const firstFile = files.find((f) => !f.isDeleted)
+      setSelectedFile(firstFile || null)
+    } else if (!isWalletConnected) {
+      setSelectedFile(null)
     }
+  }, [isWalletConnected, files, isMobile])
 
-    // 添加小延迟确保documentManager完全初始化
-    const timeoutId = setTimeout(loadDocuments, 100)
-
-    return () => {
-      mounted = false
-      clearTimeout(timeoutId)
-    }
-  }, [isWalletConnected, walletAddress])
-
-  // 监听 MetaMask 账户切换
-  useEffect(() => {
-    if (typeof window !== 'undefined' && window.ethereum) {
-      const handleAccountsChanged = (accounts: string[]) => {
-        if (accounts.length === 0) {
-          // 用户断开连接
-          disconnectWallet()
-        } else if (accounts[0] !== walletAddress) {
-          // 用户切换了账户
-          window.location.reload() // 简单地重新加载页面以重新初始化
-        }
-      }
-
-      window.ethereum.on('accountsChanged', handleAccountsChanged)
-
-      return () => {
-        window.ethereum.removeListener('accountsChanged', handleAccountsChanged)
-      }
-    }
-  }, [walletAddress, disconnectWallet])
-
-  const handleConnectWallet = async () => {
-    try {
-      await connectWallet()
-    } catch (error) {
-      console.error('Failed to connect wallet:', error)
-    }
+  const handleConnectWallet = () => {
+    setIsWalletConnected(true)
+    setWalletAddress("0x1234...abcd")
   }
 
   const handleDisconnectWallet = () => {
-    disconnectWallet()
+    setIsWalletConnected(false)
+    setWalletAddress(null)
     setSelectedFile(null)
   }
 
-  const handleSelectFile = async (fileId: string) => {
+  const handleSelectFile = (fileId: string) => {
     const file = files.find((f) => f.id === fileId)
     if (file) {
       setSelectedFile(file)
       setIsEditingNewFile(false)
-      
-      // 如果文件内容为空，尝试解密并加载内容
-      if (!file.content && file.tokenId) {
-        try {
-          toast({
-            title: "Loading document...",
-            description: "Decrypting your document"
-          })
-          
-          // 查找对应的NFT
-          const nft = documentManager.userNFTs.find(n => n.tokenId === file.tokenId)
-          if (nft) {
-            // 解密文档内容
-            const decryptResult = await documentManager.decryptDocumentFromNFT(nft)
-            
-            // 更新文件内容
-            const updatedFile = {
-              ...file,
-              content: decryptResult.content
-            }
-            
-            setSelectedFile(updatedFile)
-            setFiles(prevFiles => 
-              prevFiles.map(f => f.id === fileId ? updatedFile : f)
-            )
-            
-            toast({
-              title: "Document loaded",
-              description: "Your document has been decrypted successfully"
-            })
-          }
-        } catch (error) {
-          console.error('Failed to decrypt document:', error)
-          toast({
-            title: "Failed to load document",
-            description: error instanceof Error ? error.message : "Unknown error",
-            variant: "destructive"
-          })
-        }
-      }
     }
   }
 
   const handleNewFile = () => {
-    const defaultContent = `Start writing...`
-
     const newFile: FileData = {
-      id: `new-${Date.now()}`,
+      id: String(Date.now()),
       name: "Untitled.md",
-      content: defaultContent,
+      content: "# New File\n\nStart writing...",
       latestVersionTimestamp: new Date().toISOString(),
-      versions: [{
-        cid: "pending",
-        txHash: "pending",
-        timestamp: new Date().toISOString(),
-        content: defaultContent,
-      }],
+      versions: [
+        {
+          cid: `QmNew${Date.now().toString().slice(-4)}`,
+          txHash: "0xpending",
+          timestamp: new Date().toISOString(),
+          content: "# New File\n\nStart writing...",
+        },
+      ],
+      isDeleted: false,
     }
+    setFiles((prevFiles) => [newFile, ...prevFiles])
     setSelectedFile(newFile)
     setIsEditingNewFile(true)
   }
 
-  // 重新加载当前选中文件的内容
-  const handleReloadSelectedFile = async () => {
-    if (!selectedFile || !selectedFile.tokenId) {
-      console.log('No selected file or tokenId to reload')
-      return
-    }
+  const handleUpdateFile = (fileId: string, newName: string, newContent: string) => {
+    const existingFile = files.find((f) => f.id === fileId)
+    const currentTimestamp = new Date().toISOString()
 
-    try {
-      toast({
-        title: "Reloading document...",
-        description: "Fetching latest version"
-      })
-
-      // 先刷新 NFT 列表以获取最新的 docMemo
-      await documentManager.loadUserNFTs()
-
-      // 查找更新后的 NFT
-      const nft = documentManager.userNFTs.find(n => n.tokenId === selectedFile.tokenId)
-      if (nft) {
-        // 解密最新的文档内容
-        const decryptResult = await documentManager.decryptDocumentFromNFT(nft)
-        
-        // 更新文件内容和元数据
-        const docMemoData = parseDocMemoData(nft.docMemo)
-        const metadata = documentManager.getDocumentMetadataFromNFT(nft)
-        
-        // 获取当前版本号
-        let currentVersion = 1
-        if (docMemoData && docMemoData.currentVersion) {
-          currentVersion = docMemoData.currentVersion
-        } else if (docMemoData && docMemoData.versions && docMemoData.versions.length > 0) {
-          currentVersion = Math.max(...docMemoData.versions.map(v => v.versionId))
-        }
-        
-        const fileName = metadata.fileName || `Document #${nft.tokenId}`
-        
-        const updatedFile = {
-          ...selectedFile,
-          name: fileName,
-          content: decryptResult.content,
-          latestVersionTimestamp: metadata.updatedAt || metadata.createdAt || nft.createdAt.toISOString()
-        }
-        
-        setSelectedFile(updatedFile)
-        setFiles(prevFiles => 
-          prevFiles.map(f => f.id === selectedFile.id ? updatedFile : f)
-        )
-        
-        toast({
-          title: "Document reloaded",
-          description: "Document content has been refreshed",
-          variant: "default"
-        })
-
-        // 刷新文件列表以反映可能的版本变更（比如restore操作）
-        setHasInitialLoad(false) // 重置初始化状态，允许重新加载
-        await loadUserDocuments()
+    if (existingFile && !isEditingNewFile) {
+      const newVersion: FileVersion = {
+        cid: `QmUpd${Date.now().toString().slice(-4)}`,
+        txHash: `0x${Math.random().toString(16).slice(2, 8)}`,
+        timestamp: currentTimestamp,
+        content: newContent,
       }
-    } catch (error) {
-      console.error('Failed to reload document:', error)
-      toast({
-        title: "Failed to reload document",
-        description: error instanceof Error ? error.message : "Unknown error",
-        variant: "destructive"
-      })
+      const updatedFileData = {
+        ...existingFile,
+        name: newName,
+        content: newContent,
+        versions: [newVersion, ...existingFile.versions],
+        latestVersionTimestamp: newVersion.timestamp,
+      }
+      setFiles(files.map((f) => (f.id === fileId ? updatedFileData : f)))
+      setSelectedFile(updatedFileData)
+    } else {
+      const newFileData: FileData = {
+        id: fileId,
+        name: newName,
+        content: newContent,
+        latestVersionTimestamp: currentTimestamp,
+        versions: [
+          {
+            cid: `QmSave${Date.now().toString().slice(-4)}`,
+            txHash: `0x${Math.random().toString(16).slice(2, 8)}`,
+            timestamp: currentTimestamp,
+            content: newContent,
+          },
+        ],
+        isDeleted: false,
+      }
+      setFiles((prevFiles) => [newFileData, ...prevFiles.filter((f) => f.id !== fileId)])
+      setSelectedFile(newFileData)
+      setIsEditingNewFile(false)
     }
   }
 
-  const handleUpdateFile = async (fileId: string, newName: string, newContent: string) => {
-    const existingFile = files.find((f) => f.id === fileId)
+  const handleRefreshFiles = () => {
+    toast.info("Refreshing file list...")
+  }
 
-    try {
-      if (isEditingNewFile || !existingFile?.tokenId) {
-        // 发布新文档
-        toast({
-          title: "Publishing document...",
-          description: "Encrypting and uploading to IPFS"
-        })
+  const handleDeleteFile = (fileId: string) => {
+    setFiles((prevFiles) => prevFiles.map((file) => (file.id === fileId ? { ...file, isDeleted: true } : file)))
 
-        const result = await documentManager.publishDocument(
-          newContent,
-          true, // 创建NFT
-          newName
-        )
-
-        toast({
-          title: "Document published!",
-          description: `Document saved to IPFS: ${result.uploadResult.ipfsHash.substring(0, 8)}...`,
-          variant: "default"
-        })
-
-        // publishDocument 内部已经刷新了 NFT 列表（包含延迟等待区块链同步）
-        // 现在重新构建页面的文件列表
-        console.log('[HANDLE_UPDATE_FILE] PublishDocument completed, now refreshing page file list')
-        console.log('[HANDLE_UPDATE_FILE] Current files count before refresh:', files.length)
-        
-        setHasInitialLoad(false) // 重置初始化状态，允许重新加载
-        await loadUserDocuments()
-        
-        console.log('[HANDLE_UPDATE_FILE] Page file list refresh completed, new count:', files.length)
-        setIsEditingNewFile(false)
-      } else {
-        // 更新现有文档（添加新版本到同一个NFT）
-        toast({
-          title: "Updating document...",
-          description: "Creating new version"
-        })
-
-        // 找到对应的NFT
-        const nft = documentManager.userNFTs.find(n => n.tokenId === existingFile.tokenId)
-        if (!nft) {
-          throw new Error('NFT not found for this document')
-        }
-
-        // 使用新的版本控制功能更新文档
-        await documentManager.updateDocument(nft, newContent, newName)
-
-        toast({
-          title: "Document updated!",
-          description: "New version created successfully",
-          variant: "default"
-        })
-
-        // 刷新文档列表
-        setHasInitialLoad(false) // 重置初始化状态，允许重新加载
-        await loadUserDocuments()
-      }
-    } catch (error) {
-      console.error('Failed to save document:', error)
-      toast({
-        title: "Failed to save document",
-        description: error instanceof Error ? error.message : "Unknown error",
-        variant: "destructive"
-      })
+    if (selectedFile?.id === fileId) {
+      const nextFile = files.find((f) => !f.isDeleted && f.id !== fileId)
+      setSelectedFile(nextFile || null)
     }
+    toast.success("File moved to trash.")
   }
 
   const renderDesktopLayout = () => (
     <div className="flex flex-1 overflow-hidden">
       <aside className="w-1/3 min-w-[250px] max-w-[350px] border-r p-4 overflow-y-auto">
-        {isLoadingFiles ? (
-          <div className="flex flex-col items-center justify-center h-full">
-            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary"></div>
-            <p className="mt-4 text-sm text-muted-foreground">Loading your documents...</p>
-          </div>
-        ) : (
-          <FileList
-            files={files}
-            selectedFileId={selectedFile?.id}
-            onSelectFile={handleSelectFile}
-            onNewFile={handleNewFile}
-            onRefresh={loadUserDocuments}
-            isRefreshing={isLoadingFiles}
-          />
-        )}
+        <FileList
+          files={files}
+          selectedFileId={selectedFile?.id}
+          onSelectFile={handleSelectFile}
+          onNewFile={handleNewFile}
+          onRefresh={handleRefreshFiles}
+          onDeleteFile={handleDeleteFile}
+          isMobile={false}
+        />
       </aside>
       <main className="flex-1 p-4 overflow-y-auto">
         {selectedFile ? (
@@ -514,8 +202,6 @@ export default function MarkdownManagerPage() {
             isNew={isEditingNewFile}
             isMobile={false}
             onBack={() => {}} // Not used on desktop
-            nft={selectedFile.tokenId ? documentManager.userNFTs.find(n => n.tokenId === selectedFile.tokenId) : null}
-            onReloadFile={handleReloadSelectedFile}
           />
         ) : (
           <div className="flex flex-col items-center justify-center h-full text-muted-foreground">
@@ -537,17 +223,16 @@ export default function MarkdownManagerPage() {
           isNew={isEditingNewFile}
           isMobile={true}
           onBack={() => setSelectedFile(null)}
-          nft={selectedFile.tokenId ? documentManager.userNFTs.find(n => n.tokenId === selectedFile.tokenId) : null}
-          onReloadFile={handleReloadSelectedFile}
         />
       ) : (
-        <FileList 
-          files={files} 
-          selectedFileId={null} 
-          onSelectFile={handleSelectFile} 
+        <FileList
+          files={files}
+          selectedFileId={null}
+          onSelectFile={handleSelectFile}
           onNewFile={handleNewFile}
-          onRefresh={loadUserDocuments}
-          isRefreshing={isLoadingFiles} 
+          onRefresh={handleRefreshFiles}
+          onDeleteFile={handleDeleteFile}
+          isMobile={true}
         />
       )}
     </div>
@@ -565,8 +250,6 @@ export default function MarkdownManagerPage() {
           walletAddress={walletAddress}
           onConnect={handleConnectWallet}
           onDisconnect={handleDisconnectWallet}
-          isLoading={isWalletLoading}
-          error={walletError}
         />
       </header>
 
@@ -578,25 +261,8 @@ export default function MarkdownManagerPage() {
         )
       ) : (
         <div className="flex flex-1 flex-col items-center justify-center text-center p-4">
-          {!isMetaMaskInstalled ? (
-            <>
-              <p className="text-lg mb-4 text-red-600">MetaMask is required to use this app.</p>
-              <p className="mb-4">Please install MetaMask to manage your encrypted files.</p>
-              <a 
-                href="https://metamask.io/" 
-                target="_blank" 
-                rel="noopener noreferrer"
-                className="text-blue-600 hover:text-blue-800 underline"
-              >
-                Install MetaMask
-              </a>
-            </>
-          ) : (
-            <>
-              <p className="text-lg mb-4">Please connect your wallet to manage your files.</p>
-              <HelpCircle className="h-12 w-12 text-muted-foreground" />
-            </>
-          )}
+          <p className="text-lg mb-4">Please connect your wallet to manage your files.</p>
+          <HelpCircle className="h-12 w-12 text-muted-foreground" />
           <div className="mt-8 max-w-md text-sm text-muted-foreground space-y-2 text-center">
             <p>My mind is mine — not yours (AI, Zuck, Elon, Sam… etc).</p>
             <p>What I share with my friends stays between us.</p>

@@ -8,24 +8,27 @@ import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
 import { HistoryViewer } from "@/components/history-viewer"
 import { Badge } from "@/components/ui/badge"
-import { History, UploadCloud, Loader2, Share2, ArrowLeft } from "lucide-react"
-import type { FileData } from "@/app/page"
-import type { NFTInfo } from "@/lib/contract"
-import { ShareDialog } from "@/components/share-dialog"
-import { useToast } from "@/hooks/use-toast"
-import { useDocumentManager } from "@/hooks/use-document-manager"
-import { useWallet } from "@/hooks/use-wallet"
 import {
-  generateAESKey,
-  exportKeyToHex,
-  encryptWithAES,
-  splitKey,
-  encryptPartialKey,
-  generateShareUrl
-} from "@/lib/share-encryption"
-import { uploadToIPFS } from "@/lib/ipfs"
-import { createDocumentNFT, DOCUMENT_NFT_ABI, getDocumentNFTContract } from "@/lib/contract"
-import { ethers } from "ethers"
+  History,
+  UploadCloud,
+  Loader2,
+  Share2,
+  ArrowLeft,
+  Bold,
+  Italic,
+  Strikethrough,
+  Heading1,
+  Heading2,
+  List,
+  ListOrdered,
+  Quote,
+  Code,
+  Link,
+  ImageIcon,
+  Table,
+} from "lucide-react"
+import type { FileData } from "@/app/page"
+import { ShareDialog } from "@/components/share-dialog"
 
 interface EditorPaneProps {
   file: FileData
@@ -33,21 +36,16 @@ interface EditorPaneProps {
   isNew: boolean
   isMobile: boolean
   onBack: () => void
-  nft?: NFTInfo | null
-  onReloadFile?: () => void // 重新加载文件内容的回调
 }
 
 type ButtonState = "idle" | "encrypting" | "uploading" | "saving" | "success" | "error"
 
-export function EditorPane({ file, onUpdateFile, isNew, isMobile, onBack, nft, onReloadFile }: EditorPaneProps) {
+export function EditorPane({ file, onUpdateFile, isNew, isMobile, onBack }: EditorPaneProps) {
   const [fileName, setFileName] = useState(file.name)
   const [markdownContent, setMarkdownContent] = useState(file.content)
   const [isHistoryOpen, setIsHistoryOpen] = useState(false)
   const [buttonState, setButtonState] = useState<ButtonState>("idle")
   const [isShareDialogOpen, setIsShareDialogOpen] = useState(false)
-  const { toast } = useToast()
-  const documentManager = useDocumentManager()
-  const { address: walletAddress } = useWallet()
 
   const [initialFileName, setInitialFileName] = useState(file.name)
   const [initialMarkdownContent, setInitialMarkdownContent] = useState(file.content)
@@ -79,26 +77,19 @@ export function EditorPane({ file, onUpdateFile, isNew, isMobile, onBack, nft, o
   }
 
   const handleEncryptAndUpdate = async () => {
-    try {
-      setButtonState("encrypting")
-      // 调用真实的更新函数
-      await onUpdateFile(file.id, fileName, markdownContent)
-      
-      setInitialFileName(fileName)
-      setInitialMarkdownContent(markdownContent)
-      setIsModified(false)
-      setButtonState("success")
-      
-      setTimeout(() => {
-        setButtonState("idle")
-      }, 2000)
-    } catch (error) {
-      console.error('Failed to update file:', error)
-      setButtonState("error")
-      setTimeout(() => {
-        setButtonState("idle")
-      }, 3000)
-    }
+    setButtonState("encrypting")
+    await new Promise((resolve) => setTimeout(resolve, 1000))
+    setButtonState("uploading")
+    await new Promise((resolve) => setTimeout(resolve, 1000))
+    setButtonState("saving")
+    await new Promise((resolve) => setTimeout(resolve, 1000))
+    onUpdateFile(file.id, fileName, markdownContent)
+    setInitialFileName(fileName)
+    setInitialMarkdownContent(markdownContent)
+    setIsModified(false)
+    setButtonState("success")
+    await new Promise((resolve) => setTimeout(resolve, 1500))
+    setButtonState("idle")
   }
 
   const getButtonContent = () => {
@@ -106,8 +97,7 @@ export function EditorPane({ file, onUpdateFile, isNew, isMobile, onBack, nft, o
       case "encrypting":
         return (
           <>
-            <Loader2 className="h-4 w-4 mr-2 animate-spin" /> 
-            {isNew ? "Publishing..." : "Updating..."}
+            <Loader2 className="h-4 w-4 mr-2 animate-spin" /> Encrypting...
           </>
         )
       case "uploading":
@@ -136,133 +126,16 @@ export function EditorPane({ file, onUpdateFile, isNew, isMobile, onBack, nft, o
     }
   }
 
-  const handleShare = async (content: string): Promise<string> => {
-    if (!walletAddress) {
-      throw new Error("Wallet not connected");
-    }
-
-    try {
-      // Step 1: Generate AES-256 key
-      const aesKey = await generateAESKey();
-      const fullKeyHex = await exportKeyToHex(aesKey);
-      
-      // Step 2: Encrypt document with AES-256-GCM
-      const { encrypted, iv } = await encryptWithAES(content, aesKey);
-      
-      // Step 3: Upload encrypted content to IPFS
-      const uploadResult = await uploadToIPFS(encrypted);
-      const ipfsHash = uploadResult.IpfsHash;
-      
-      // Step 4: Split key and encrypt partial key
-      const { front: partialKey, secret: secretKey } = splitKey(fullKeyHex);
-      const encryptedPartialKey = encryptPartialKey(partialKey, secretKey);
-      
-      // Step 5: Create share NFT
-      const docMemoData = {
-        version: "1.0-share",
-        type: "shared",
-        metadata: {
-          fileName: fileName,
-          fileType: "markdown",
-          title: fileName.replace(/\.md$/, ''),
-          createdAt: new Date().toISOString(),
-          size: encrypted.byteLength,
-          originalTokenId: file.tokenId?.toString()
-        },
-        shareInfo: {
-          encryptedPartialKey: encryptedPartialKey,
-          iv: Array.from(iv).map(b => b.toString(16).padStart(2, '0')).join(''),
-          algorithm: "AES-256-GCM",
-          keyEncryption: "XOR",
-          sharedBy: walletAddress,
-          sharedAt: new Date().toISOString()
-        },
-        versions: [{
-          versionId: 1,
-          ipfsHash: ipfsHash,
-          timestamp: new Date().toISOString(),
-          size: encrypted.byteLength,
-          encryptedKey: encryptedPartialKey,
-          encryptedNonce: "SHARED_DOCUMENT"
-        }],
-        currentVersion: 1
-      };
-
-      const params = {
-        recipient: walletAddress,
-        amount: 1,
-        documentId: ipfsHash.substring(0, 8),
-        docUID: ipfsHash,
-        storageAddress: ipfsHash,
-        docMemo: JSON.stringify(docMemoData)
-      };
-      
-      // Create NFT and get transaction hash
-      const txHash = await createDocumentNFT(params, walletAddress);
-      
-      // Get transaction receipt to extract tokenId
-      const provider = new ethers.BrowserProvider(window.ethereum);
-      const receipt = await provider.getTransactionReceipt(txHash);
-      
-      if (!receipt) {
-        throw new Error("Failed to get transaction receipt");
-      }
-      
-      // Parse the event logs to find DocumentCreated event
-      const iface = new ethers.Interface(DOCUMENT_NFT_ABI);
-      let tokenId: number | null = null;
-      
-      // Try to find DocumentCreated event
-      const logs = receipt.logs.map(log => {
-        try {
-          return iface.parseLog(log);
-        } catch (e) {
-          return null;
-        }
-      }).filter(Boolean);
-      
-      // Look for DocumentCreated event first
-      const documentCreatedEvent = logs.find(log => log?.name === 'DocumentCreated');
-      if (documentCreatedEvent) {
-        tokenId = Number(documentCreatedEvent.args.tokenId);
-      } else {
-        // Fallback: Look for TransferSingle event (ERC1155)
-        const transferEvent = logs.find(log => log?.name === 'TransferSingle');
-        if (transferEvent) {
-          tokenId = Number(transferEvent.args.id);
-        } else {
-          // Final fallback: Get the latest tokenId from contract
-          console.log('No event found, fetching latest tokenId from contract...');
-          const contract = getDocumentNFTContract();
-          const currentTokenId = await contract.getCurrentTokenId();
-          tokenId = Number(currentTokenId);
-          
-          // Verify that this NFT belongs to the user
-          const balance = await contract.balanceOf(walletAddress, tokenId);
-          if (Number(balance) === 0) {
-            throw new Error("Failed to verify NFT ownership");
-          }
-        }
-      }
-      
-      if (!tokenId) {
-        throw new Error("Failed to get NFT token ID");
-      }
-      
-      // Step 6: Generate share URL
-      const shareUrl = generateShareUrl(tokenId, secretKey);
-      
-      return shareUrl;
-    } catch (error) {
-      console.error("Failed to create share link:", error);
-      throw error;
-    }
+  const handleShare = async (address: string) => {
+    console.log(`Sharing file ${file.id} with address ${address}`)
+    await new Promise((resolve) => setTimeout(resolve, 1500))
+    alert(`Access granted to ${address} (mocked).`)
   }
 
   return (
     <div className="flex flex-col h-full gap-4">
       {isMobile && (
-        <Button variant="outline" onClick={onBack} className="self-start">
+        <Button variant="outline" onClick={onBack} className="self-start bg-transparent">
           <ArrowLeft className="h-4 w-4 mr-2" />
           Back to File List
         </Button>
@@ -302,8 +175,8 @@ export function EditorPane({ file, onUpdateFile, isNew, isMobile, onBack, nft, o
             <Button
               variant="outline"
               onClick={() => setIsShareDialogOpen(true)}
-              disabled={isNew || isModified}
-              title={isNew ? "Publish the file first to enable sharing" : isModified ? "Save your changes before sharing" : "Share file"}
+              disabled={isNew}
+              title={isNew ? "Publish the file first to enable sharing" : "Share file"}
               className="flex-1"
             >
               <Share2 className="h-4 w-4 mr-2" />
@@ -317,32 +190,98 @@ export function EditorPane({ file, onUpdateFile, isNew, isMobile, onBack, nft, o
         </div>
       </div>
 
-      <div className="flex-1 flex flex-col overflow-hidden">
-        <label htmlFor="markdown-editor" className="text-sm font-medium mb-1">
-          Markdown Editor
-        </label>
-        <Textarea
-          id="markdown-editor"
-          value={markdownContent}
-          onChange={handleMarkdownChange}
-          className="flex-1 resize-none font-mono text-sm"
-          aria-label="Markdown Content"
-        />
+      <div className="flex-1 flex flex-col gap-4 overflow-hidden">
+        <div className="flex flex-col border rounded-lg overflow-hidden">
+          {/* Toolbar */}
+          <div className="flex items-center gap-1 p-2 border-b bg-muted/30 flex-wrap">
+            <Button variant="ghost" size="sm" className="h-8 w-8 p-0">
+              <Bold className="h-4 w-4" />
+            </Button>
+            <Button variant="ghost" size="sm" className="h-8 w-8 p-0">
+              <Italic className="h-4 w-4" />
+            </Button>
+            <Button variant="ghost" size="sm" className="h-8 w-8 p-0">
+              <Strikethrough className="h-4 w-4" />
+            </Button>
+            <div className="w-px h-6 bg-border mx-1" />
+            <Button variant="ghost" size="sm" className="h-8 w-8 p-0">
+              <Heading1 className="h-4 w-4" />
+            </Button>
+            <Button variant="ghost" size="sm" className="h-8 w-8 p-0">
+              <Heading2 className="h-4 w-4" />
+            </Button>
+            <div className="w-px h-6 bg-border mx-1" />
+            <Button variant="ghost" size="sm" className="h-8 w-8 p-0">
+              <List className="h-4 w-4" />
+            </Button>
+            <Button variant="ghost" size="sm" className="h-8 w-8 p-0">
+              <ListOrdered className="h-4 w-4" />
+            </Button>
+            <div className="w-px h-6 bg-border mx-1" />
+            <Button variant="ghost" size="sm" className="h-8 w-8 p-0">
+              <Quote className="h-4 w-4" />
+            </Button>
+            <Button variant="ghost" size="sm" className="h-8 w-8 p-0">
+              <Code className="h-4 w-4" />
+            </Button>
+            <Button variant="ghost" size="sm" className="h-8 w-8 p-0">
+              <Link className="h-4 w-4" />
+            </Button>
+            <Button variant="ghost" size="sm" className="h-8 w-8 p-0">
+              <ImageIcon className="h-4 w-4" />
+            </Button>
+            <div className="w-px h-6 bg-border mx-1" />
+            <Button variant="ghost" size="sm" className="h-8 w-8 p-0">
+              <Table className="h-4 w-4" />
+            </Button>
+          </div>
+
+          {/* Editor Content Area */}
+          <div className={`flex-1 flex ${isMobile ? "flex-col" : "flex-row"} overflow-hidden`}>
+            {/* Markdown Editor */}
+            <div className="flex-1 flex flex-col">
+              <div className="p-2 border-b bg-muted/10">
+                <span className="text-xs font-medium text-muted-foreground">Markdown</span>
+              </div>
+              <Textarea
+                id="markdown-editor"
+                value={markdownContent}
+                onChange={handleMarkdownChange}
+                className="flex-1 resize-none font-mono text-sm border-0 rounded-none focus-visible:ring-0"
+                aria-label="Markdown Content"
+                placeholder="Start writing your markdown content..."
+              />
+            </div>
+
+            {/* Preview Pane */}
+            {!isMobile && (
+              <>
+                <div className="w-px bg-border" />
+                <div className="flex-1 flex flex-col">
+                  <div className="p-2 border-b bg-muted/10">
+                    <span className="text-xs font-medium text-muted-foreground">Preview</span>
+                  </div>
+                  <div className="flex-1 p-4 overflow-y-auto prose prose-sm dark:prose-invert max-w-none">
+                    <pre className="whitespace-pre-wrap break-words text-sm font-sans">{markdownContent}</pre>
+                  </div>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
       </div>
 
       <HistoryViewer
         isOpen={isHistoryOpen}
         onOpenChange={setIsHistoryOpen}
-        nft={nft || null}
+        versions={file.versions}
         fileName={fileName}
-        onVersionRestored={onReloadFile}
       />
       <ShareDialog
         isOpen={isShareDialogOpen}
         onOpenChange={setIsShareDialogOpen}
         fileName={fileName}
         fileId={file.id}
-        fileContent={markdownContent}
         onShare={handleShare}
       />
     </div>

@@ -2,116 +2,164 @@
 
 import { Button } from "@/components/ui/button"
 import { ScrollArea } from "@/components/ui/scroll-area"
-import { FilePlus2, FileText, RefreshCw } from "lucide-react"
-import type { FileData } from "@/app/page" // Ensure this path is correct
+import { cn } from "@/lib/utils"
+import type { FileData } from "@/app/page"
+import { FilePlus2, FileText, RefreshCw, Minus } from "lucide-react"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { useRef } from "react"
+
+const FileItem = ({
+  file,
+  isSelected,
+  isMobile,
+  onSelect,
+  onDelete,
+}: {
+  file: FileData
+  isSelected: boolean
+  isMobile: boolean
+  onSelect: (id: string) => void
+  onDelete: (id: string) => void
+}) => {
+  const longPressTimer = useRef<NodeJS.Timeout | null>(null)
+  const wasLongPress = useRef(false)
+
+  const handlePointerDown = () => {
+    if (isMobile) {
+      wasLongPress.current = false
+      longPressTimer.current = setTimeout(() => {
+        wasLongPress.current = true
+        onDelete(file.id)
+      }, 500) // 500ms for a long press
+    }
+  }
+
+  const handlePointerUp = () => {
+    if (longPressTimer.current) {
+      clearTimeout(longPressTimer.current)
+    }
+  }
+
+  const handleClick = () => {
+    if (wasLongPress.current) {
+      return // Don't select if a long press just happened
+    }
+    onSelect(file.id)
+  }
+
+  return (
+    <div
+      className="group relative"
+      onPointerDown={handlePointerDown}
+      onPointerUp={handlePointerUp}
+      onPointerLeave={handlePointerUp} // Cancel long press if pointer leaves
+      onClick={handleClick}
+    >
+      <div
+        className={cn(
+          "w-full justify-start text-left h-auto py-2 px-3 rounded-md",
+          "flex items-center cursor-pointer",
+          isSelected ? "bg-secondary text-secondary-foreground" : "hover:bg-accent",
+        )}
+      >
+        <FileText className="h-4 w-4 mr-2 flex-shrink-0" />
+        <span className="truncate flex-grow">{file.name}</span>
+      </div>
+      {!isMobile && (
+        <Button
+          variant="ghost"
+          size="icon"
+          className="absolute right-1 top-1/2 -translate-y-1/2 h-7 w-7 opacity-0 group-hover:opacity-100 transition-opacity"
+          onClick={(e) => {
+            e.stopPropagation()
+            onDelete(file.id)
+          }}
+        >
+          <Minus className="h-4 w-4" />
+          <span className="sr-only">Delete file</span>
+        </Button>
+      )}
+    </div>
+  )
+}
 
 interface FileListProps {
   files: FileData[]
   selectedFileId?: string | null
   onSelectFile: (fileId: string) => void
   onNewFile: () => void
-  onRefresh?: () => void
-  isRefreshing?: boolean
+  onRefresh: () => void
+  onDeleteFile: (fileId: string) => void
+  isMobile: boolean
 }
 
-export function FileList({ files, selectedFileId, onSelectFile, onNewFile, onRefresh, isRefreshing }: FileListProps) {
-  // Sort files by latestVersionTimestamp descending
+export function FileList({
+  files,
+  selectedFileId,
+  onSelectFile,
+  onNewFile,
+  onRefresh,
+  onDeleteFile,
+  isMobile,
+}: FileListProps) {
   const sortedFiles = [...files].sort(
     (a, b) => new Date(b.latestVersionTimestamp).getTime() - new Date(a.latestVersionTimestamp).getTime(),
   )
+  const regularFiles = sortedFiles.filter((f) => !f.isDeleted)
+  const deletedFiles = sortedFiles.filter((f) => f.isDeleted)
 
   return (
     <div className="flex flex-col h-full">
-      <Button onClick={onNewFile} className="mb-4 w-full">
-        <FilePlus2 className="h-4 w-4 mr-2" />
-        New File
-      </Button>
-      <div className="flex items-center justify-between mb-2">
-        <h2 className="text-lg font-semibold">My Files</h2>
-        {onRefresh && (
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={onRefresh}
-            disabled={isRefreshing}
-            className="h-8 w-8 p-0"
-            title="Refresh document list"
-          >
-            <RefreshCw className={`h-4 w-4 ${isRefreshing ? 'animate-spin' : ''}`} />
-          </Button>
-        )}
+      <div className="flex gap-2 mb-4">
+        <Button onClick={onNewFile} className="flex-1">
+          <FilePlus2 className="h-4 w-4 mr-2" />
+          New File
+        </Button>
+        <Button onClick={onRefresh} variant="outline" size="icon">
+          <RefreshCw className="h-4 w-4" />
+        </Button>
       </div>
-      {sortedFiles.length === 0 && !isRefreshing && (
-        <div className="flex-1 p-6">
-          <div className="max-w-md mx-auto space-y-4 text-sm">
-            <div className="text-center">
-              <h3 className="font-semibold text-foreground mb-2">Welcome to BlueDocs! 👋</h3>
-              <p className="text-muted-foreground">This is your new encrypted Markdown document.</p>
-            </div>
-            
-            <div className="space-y-3">
-              <div>
-                <h4 className="font-medium text-foreground mb-2">## Getting Started</h4>
-                <p className="text-muted-foreground mb-3">Start writing your content here. Your document will be:</p>
-                <ul className="space-y-2 text-muted-foreground">
-                  <li className="flex items-start">
-                    <span className="mr-2">🔐</span>
-                    <span><strong className="text-foreground">Encrypted</strong> locally in your browser</span>
-                  </li>
-                  <li className="flex items-start">
-                    <span className="mr-2">📦</span>
-                    <span><strong className="text-foreground">Stored</strong> on IPFS (decentralized storage)</span>
-                  </li>
-                  <li className="flex items-start">
-                    <span className="mr-2">🔗</span>
-                    <span><strong className="text-foreground">Linked</strong> to your wallet via NFT on Optimism blockchain</span>
-                  </li>
-                </ul>
-              </div>
-
-              <div>
-                <h4 className="font-medium text-foreground mb-2">## Features</h4>
-                <ul className="space-y-2 text-muted-foreground">
-                  <li className="flex items-start">
-                    <span className="mr-2">•</span>
-                    <span><strong className="text-foreground">Privacy First</strong>: Only you can decrypt your documents</span>
-                  </li>
-                  <li className="flex items-start">
-                    <span className="mr-2">•</span>
-                    <span><strong className="text-foreground">Version Control</strong>: Every update creates a new version</span>
-                  </li>
-                  <li className="flex items-start">
-                    <span className="mr-2">•</span>
-                    <span><strong className="text-foreground">Decentralized</strong>: No central server, your data is truly yours</span>
-                  </li>
-                </ul>
-              </div>
-
-            </div>
-          </div>
-        </div>
-      )}
-      <ScrollArea className="flex-1">
-        <ul>
-          {sortedFiles.map((file) => (
-            <li key={file.id} className="mb-1">
-              <Button
-                variant={selectedFileId === file.id ? "secondary" : "ghost"}
-                className="w-full justify-start text-left h-auto py-3 px-3"
-                onClick={() => onSelectFile(file.id)}
-              >
-                <FileText className="h-4 w-4 mr-2 flex-shrink-0" />
-                <div className="flex-grow overflow-hidden">
-                  <p className="truncate font-medium">{file.name}</p>
-                  <p className="text-xs text-muted-foreground">
-                    {new Date(file.latestVersionTimestamp).toLocaleDateString()}
-                  </p>
-                </div>
-              </Button>
-            </li>
-          ))}
-        </ul>
-      </ScrollArea>
+      <Tabs defaultValue="files" className="flex-1 flex flex-col">
+        <TabsList className="grid w-full grid-cols-2">
+          <TabsTrigger value="files">My Files</TabsTrigger>
+          <TabsTrigger value="deleted">Deleted</TabsTrigger>
+        </TabsList>
+        <TabsContent value="files" className="flex-1 mt-2 min-h-0">
+          <ScrollArea className="h-full">
+            {regularFiles.length === 0 && (
+              <p className="text-sm text-muted-foreground text-center py-4">No files yet. Create one!</p>
+            )}
+            <ul>
+              {regularFiles.map((file) => (
+                <li key={file.id} className="mb-1">
+                  <FileItem
+                    file={file}
+                    isSelected={selectedFileId === file.id}
+                    isMobile={isMobile}
+                    onSelect={onSelectFile}
+                    onDelete={onDeleteFile}
+                  />
+                </li>
+              ))}
+            </ul>
+          </ScrollArea>
+        </TabsContent>
+        <TabsContent value="deleted" className="flex-1 mt-2 min-h-0">
+          <ScrollArea className="h-full">
+            {deletedFiles.length === 0 && (
+              <p className="text-sm text-muted-foreground text-center py-4">No deleted files.</p>
+            )}
+            <ul>
+              {deletedFiles.map((file) => (
+                <li key={file.id} className="mb-1 p-2 text-muted-foreground text-sm flex items-center">
+                  <FileText className="h-4 w-4 mr-2 inline-block flex-shrink-0" />
+                  <span className="truncate">{file.name}</span>
+                </li>
+              ))}
+            </ul>
+          </ScrollArea>
+        </TabsContent>
+      </Tabs>
     </div>
   )
 }
