@@ -80,16 +80,26 @@ const mockFiles: FileData[] = [
 
 // 主组件：Markdown 管理器页面
 export default function MarkdownManagerPage() {
-
+  // Use the real wallet hook
+  const {
+    isConnected: isWalletConnected,
+    address: walletAddress,
+    publicKey,
+    isLoading: isWalletLoading,
+    error: walletError,
+    connectWallet,
+    disconnectWallet,
+    isMetaMaskInstalled
+  } = useWallet()
   
   // 状态管理：文件列表数据
   const [files, setFiles] = useState<FileData[]>(mockFiles)
   // 状态管理：当前选中的文件
   const [selectedFile, setSelectedFile] = useState<FileData | null>(null)
   // 状态管理：钱包连接状态
-  const [isWalletConnected, setIsWalletConnected] = useState(false)
+  //const [isWalletConnected, setIsWalletConnected] = useState(false)
   // 状态管理：钱包地址
-  const [walletAddress, setWalletAddress] = useState<string | null>(null)
+  //const [walletAddress, setWalletAddress] = useState<string | null>(null)
   // 状态管理：是否正在编辑新文件
   const [isEditingNewFile, setIsEditingNewFile] = useState(false)
   // 响应式设计：检测是否为移动设备（屏幕宽度小于768px）
@@ -108,16 +118,20 @@ export default function MarkdownManagerPage() {
   }, [isWalletConnected, files, isMobile])
 
   // 事件处理函数：连接钱包
-  const handleConnectWallet = () => {
-    setIsWalletConnected(true)
-    setWalletAddress("0x1234...abcd")  // 模拟钱包地址
+  const handleConnectWallet = async() => {
+    try {
+      await connectWallet()
+    } catch (error) {
+      console.error('Failed to connect wallet:', error)
+    } // 模拟钱包地址
   }
 
   // 事件处理函数：断开钱包连接
   const handleDisconnectWallet = () => {
-    setIsWalletConnected(false)
-    setWalletAddress(null)
-    setSelectedFile(null)  // 清除选中的文件
+    
+    disconnectWallet()
+    setSelectedFile(null)
+
   }
 
   // 事件处理函数：选择文件
