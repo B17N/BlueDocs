@@ -27,6 +27,7 @@ export interface FileData {
   id: string; // 文件唯一标识符
   name: string; // 文件名称
   content: string; // 文件内容
+  isNewClientSide: boolean; // 是否是客户端新建的文件
   versions: FileVersion[]; // 文件版本历史记录
   latestVersionTimestamp: string; // 最新版本的时间戳
   isDeleted?: boolean; // 是否已删除（可选字段）
@@ -90,6 +91,7 @@ export default function MarkdownManagerPage() {
         id: doc.uid,
         name: doc.metadata.title || doc.fileName || "Untitled.md",
         content: "", // 暂时为空，点击时再解密
+        isNewClientSide: false,
         latestVersionTimestamp: doc.metadata.uploadedAt,
         versions: [
           {
@@ -286,6 +288,23 @@ export default function MarkdownManagerPage() {
 
   // 事件处理函数：选择文件
   const handleSelectFile = async (fileId: string) => {
+    // 检查是否有未保存的新文件
+    if (isEditingNewFile) {
+      const shouldContinue = window.confirm(
+        "您有一个未保存的新文件。如果继续选择其他文件，新文件的更改将会丢失。是否继续？"
+      );
+      if (!shouldContinue) {
+        return;
+      }else{
+      // 从文件列表中移除新文件
+      setFiles(prevFiles => prevFiles.filter(f => !f.isNewClientSide));
+      setIsEditingNewFile(false);
+      }
+    }
+    
+    // 如果有新文件且未保存，清除新文件状态
+
+
     const file = files.find((f) => f.id === fileId);
     if (!file) return;
 
@@ -336,11 +355,22 @@ export default function MarkdownManagerPage() {
 
   // 事件处理函数：创建新文件
   const handleNewFile = () => {
+    // 检查是否已经有未保存的新文件
+    if (isEditingNewFile) {
+      const shouldContinue = window.confirm(
+        "您有一个未保存的新文件。如果继续创建新文件，当前文件的更改将会丢失。是否继续？"
+      );
+      if (!shouldContinue) {
+        return;
+      }
+    }
+    
     // 创建新文件对象，使用当前时间戳作为 ID
     const newFile: FileData = {
       id: String(Date.now()),
       name: "Untitled.md",
       content: "# New File\n\nStart writing...",
+      isNewClientSide: true,
       latestVersionTimestamp: new Date().toISOString(),
       versions: [
         {
@@ -352,14 +382,14 @@ export default function MarkdownManagerPage() {
       ],
       isDeleted: false,
     };
-    // 将新文件添加到文件列表开头
-    setFiles((prevFiles) => [newFile, ...prevFiles]);
-    setSelectedFile(newFile); // 选中新创建的文件
+    // 直接选中新文件，不添加到文件列表中
+    setSelectedFile(newFile);
     setIsEditingNewFile(true); // 进入新文件编辑模式
+    
   };
 
   // 事件处理函数：更新文件内容
-  const handleUpdateFile = (
+  const handleUpdateFile = async (
     fileId: string,
     newName: string,
     newContent: string
@@ -367,49 +397,489 @@ export default function MarkdownManagerPage() {
     const existingFile = files.find((f) => f.id === fileId);
     const currentTimestamp = new Date().toISOString();
 
-    // 如果文件已存在且不是新文件编辑模式，创建新版本
-    if (existingFile && !isEditingNewFile) {
-      // 创建新版本对象
-      const newVersion: FileVersion = {
-        cid: `QmUpd${Date.now().toString().slice(-4)}`, // 生成更新版本的 CID
-        txHash: `0x${Math.random().toString(16).slice(2, 8)}`, // 生成随机交易哈希
-        timestamp: currentTimestamp,
-        content: newContent,
-      };
-      // 更新文件数据，将新版本添加到版本历史开头
-      const updatedFileData = {
-        ...existingFile,
-        name: newName,
-        content: newContent,
-        versions: [newVersion, ...existingFile.versions],
-        latestVersionTimestamp: newVersion.timestamp,
-      };
-      setFiles(files.map((f) => (f.id === fileId ? updatedFileData : f)));
-      setSelectedFile(updatedFileData);
-    } else {
-      // 如果是新文件或编辑新文件，创建完整的文件对象
-      const newFileData: FileData = {
-        id: fileId,
-        name: newName,
-        content: newContent,
-        latestVersionTimestamp: currentTimestamp,
-        versions: [
-          {
-            cid: `QmSave${Date.now().toString().slice(-4)}`, // 生成保存版本的 CID
-            txHash: `0x${Math.random().toString(16).slice(2, 8)}`, // 生成随机交易哈希
-            timestamp: currentTimestamp,
-            content: newContent,
+    // 只处理新文件发布
+    if (isEditingNewFile && selectedFile?.id === fileId) {
+      try {
+        // 前置检查
+        if (!isWalletConnected || !walletAddress) {
+          toast.error("请先连接钱包");
+          return;
+        }
+
+        if (!publicKey) {
+          toast.error("无法获取钱包公钥，请重新连接钱包");
+          return;
+        }
+
+        if (!newContent.trim()) {
+          toast.error("文件内容不能为空");
+          return;
+        }
+
+        if (!newName.trim()) {
+          toast.error("文件名不能为空");
+          return;
+        }
+
+        // 显示开始处理的提示
+        toast.loading("正在处理文件发布...", { id: "publish-progress" });
+
+        // 步骤1：加密单个文件内容
+        console.log("=== 步骤1-开始加密文件内容 ===");
+        toast.loading("正在加密文件内容...", { id: "publish-progress" });
+        
+        const encryptionResult = encryptText(newContent);
+
+        console.log("加密结果:", encryptionResult.encryptedData);
+
+        // 步骤2：上传单个文件到 IPFS
+        console.log("=== 步骤2：开始上传文件到 IPFS ===");
+        toast.loading("正在上传文件到 IPFS...", { id: "publish-progress" });
+        const ipfsFileName = `encrypted_document_${Date.now()}.bin`;
+        const ipfsResult = await uploadToIPFS(encryptionResult.encryptedData, {
+          fileName: ipfsFileName,
+          fileType: "application/octet-stream",
+          metadata: {
+            uploadedAt: currentTimestamp,
+            encrypted: "true",
+            walletAddress: walletAddress,
+            source: "BlueDoku_DocumentEditor"
+          }
+        });
+
+        const keyData = {
+          encryptionKey: encryptionResult.key,
+          nonce: encryptionResult.nonce,
+          ipfsHash: ipfsResult.IpfsHash,
+          timestamp: ipfsResult.Timestamp
+        };
+        const encryptedKeyData = await encryptWithMetaMask(
+          JSON.stringify(keyData),
+          publicKey
+        );
+
+        // 步骤4：创建文件元数据
+        console.log("=== 步骤4：创建文件元数据 ===");
+        toast.loading("正在创建文件元数据...", { id: "publish-progress" });
+
+        const uid = crypto.randomUUID();
+        const gatewayUrl = `https://gateway.pinata.cloud/ipfs/${ipfsResult.IpfsHash}`;
+
+        const documentMetadata = {
+          uid: uid,
+          fileName: ipfsFileName,
+          fileType: "application/octet-stream",
+          metadata: {
+            uploadedAt: currentTimestamp,        
+            encrypted: "true",
+            title: newName
           },
-        ],
-        isDeleted: false,
-      };
-      // 替换或添加文件到列表
-      setFiles((prevFiles) => [
-        newFileData,
-        ...prevFiles.filter((f) => f.id !== fileId),
-      ]);
-      setSelectedFile(newFileData);
-      setIsEditingNewFile(false); // 退出新文件编辑模式
+          ipfsResult: {
+            ipfsHash: ipfsResult.IpfsHash,
+            gatewayUrl: gatewayUrl,
+            pinSize: ipfsResult.PinSize,
+            timestamp: ipfsResult.Timestamp
+          },
+          encryptionInfo: {
+            metamaskEncryptedKeys: encryptedKeyData
+          }
+        };
+
+        console.log("=== 创建的文件元数据 ===");
+        console.log(JSON.stringify(documentMetadata, null, 2));
+
+        // 步骤5：添加到文档集合
+        console.log("=== 步骤5：添加到文档集合 ===");
+       
+        // 更新原始文档元数据
+        const updatedOriginalMetadata = [...originalDocumentMetadata, documentMetadata];
+        setOriginalDocumentMetadata(updatedOriginalMetadata);
+        console.log("=== 原始文档元数据集合 ===");
+        console.log(JSON.stringify(updatedOriginalMetadata, null, 2));
+
+        // 步骤6：加密整个文档集合
+        console.log("=== 步骤6：开始加密文档集合 ===");
+        toast.loading("正在加密文档集合...", { id: "publish-progress" });
+
+        const collectionJSON = JSON.stringify(updatedOriginalMetadata);
+        const collectionEncryptionResult = encryptText(collectionJSON);
+        console.log("文档集合加密结果:", {
+          originalSize: collectionJSON.length,
+          encryptedSize: collectionEncryptionResult.encryptedData.length
+        });
+
+        // 步骤7：上传加密的文档集合到 IPFS
+        console.log("=== 步骤7：上传加密的文档集合到 IPFS ===");
+        toast.loading("正在上传文档集合到 IPFS...", { id: "publish-progress" });
+
+        const collectionFileName = `document_collection_${Date.now()}.bin`;
+        const collectionIpfsResult = await uploadToIPFS(collectionEncryptionResult.encryptedData, {
+          fileName: collectionFileName,
+          fileType: "application/octet-stream",
+          metadata: {
+            uploadedAt: currentTimestamp,
+            encrypted: "true",
+            walletAddress: walletAddress,
+            source: "BlueDoku_DocumentCollection",
+            collectionSize: updatedOriginalMetadata.length.toString()
+          }
+        });
+
+        console.log("文档集合 IPFS 上传结果:", collectionIpfsResult);
+
+        // 步骤8：准备集合的 MetaMask 加密密钥
+        console.log("=== 步骤8：MetaMask 加密集合密钥 ===");
+        toast.loading("正在加密集合密钥数据...", { id: "publish-progress" });
+
+        const collectionKeyData = {
+          encryptionKey: collectionEncryptionResult.key,
+          nonce: collectionEncryptionResult.nonce,
+          ipfsHash: collectionIpfsResult.IpfsHash,
+          timestamp: collectionIpfsResult.Timestamp
+        };
+
+        const encryptedCollectionMemo = await encryptWithMetaMask(
+          JSON.stringify(collectionKeyData),
+          publicKey
+        );
+
+        console.log("集合密钥 MetaMask 加密成功");
+
+        // 步骤9：初始化合约
+        console.log("=== 步骤9：初始化合约 ===");
+        toast.loading("正在初始化合约...", { id: "publish-progress" });
+
+        const contract = getDefaultContract();
+        await contract.init();
+        console.log("合约初始化成功");
+
+        // 步骤10：检查用户 NFT 状态
+        console.log("=== 步骤10：检查用户 NFT 状态 ===");
+        toast.loading("正在检查用户 NFT 状态...", { id: "publish-progress" });
+
+        const tokenIds = await contract.getUserTokenIds(walletAddress);
+        console.log("用户拥有的 TokenId 列表:", tokenIds.map(id => id.toString()));
+
+        // 步骤11：创建或更新 DocumentList NFT
+        console.log("=== 步骤11：创建或更新 DocumentList NFT ===");
+        
+        let operation: 'create' | 'update';
+        let tokenId: bigint;
+        let txHash: string;
+
+        if (tokenIds.length === 0) {
+          // 创建新的 DocumentList
+          console.log("用户没有 NFT，创建新的 DocumentList");
+          toast.loading("正在创建新的文档列表 NFT...", { id: "publish-progress" });
+
+          const createResult = await contract.createDocumentListWithDetails(
+            collectionIpfsResult.IpfsHash, 
+            encryptedCollectionMemo
+          );
+          tokenId = createResult.tokenId;
+          txHash = createResult.txHash;
+          operation = 'create';
+
+          console.log("创建 NFT 成功:", {
+            tokenId: tokenId.toString(),
+            txHash: txHash
+          });
+
+        } else {
+          // 更新现有的 DocumentList (使用第一个)
+          console.log("用户有 NFT，更新现有的 DocumentList");
+          toast.loading("正在更新文档列表 NFT...", { id: "publish-progress" });
+
+          tokenId = tokenIds[0];
+          const updateResult = await contract.updateDocumentListWithDetails(
+            tokenId, 
+            collectionIpfsResult.IpfsHash, 
+            encryptedCollectionMemo
+          );
+          txHash = updateResult.txHash;
+          operation = 'update';
+
+          console.log("更新 NFT 成功:", {
+            tokenId: tokenId.toString(),
+            txHash: txHash
+          });
+        }
+
+        toast.loading("等待交易确认...", { id: "publish-progress" });
+
+        // 显示最终成功消息
+        toast.success(
+          operation === 'create' ? "文档列表 NFT 创建成功！" : "文档列表 NFT 更新成功！",
+          {
+            id: "publish-progress",
+            description: `TokenId: ${tokenId.toString()}`,
+            duration: 5000
+          }
+        );
+
+                 console.log("=== 完整流程完成 ===");
+         console.log("操作结果:", {
+           operation,
+           tokenId: tokenId.toString(),
+           txHash: txHash,
+           collectionIpfsHash: collectionIpfsResult.IpfsHash,
+           documentCount: updatedOriginalMetadata.length
+         });
+         
+         // 重置编辑状态
+         setIsEditingNewFile(false);
+         
+         // 重新获取用户NFT信息，刷新文件列表
+         console.log("=== 刷新文件列表 ===");
+         await fetchUserNFTs(walletAddress);
+        
+      } catch (error) {
+        console.error("文件发布失败:", error);
+        toast.error("文件发布失败", {
+          id: "publish-progress",
+          description: error instanceof Error ? error.message : "未知错误",
+          duration: 5000
+        });
+      }
+    } else {
+      // 处理已有文件的更新
+      try {
+        // 前置检查
+        if (!isWalletConnected || !walletAddress) {
+          toast.error("请先连接钱包");
+          return;
+        }
+
+        if (!publicKey) {
+          toast.error("无法获取钱包公钥，请重新连接钱包");
+          return;
+        }
+
+        if (!newContent.trim()) {
+          toast.error("文件内容不能为空");
+          return;
+        }
+
+        if (!newName.trim()) {
+          toast.error("文件名不能为空");
+          return;
+        }
+
+        // 显示开始处理的提示
+        toast.loading("正在处理文件更新...", { id: "update-progress" });
+
+        // 步骤1：加密单个文件内容
+        console.log("=== 步骤1-开始加密更新的文件内容 ===");
+        toast.loading("正在加密文件内容...", { id: "update-progress" });
+        
+        const encryptionResult = encryptText(newContent);
+        console.log("加密结果:", encryptionResult.encryptedData);
+
+        // 步骤2：上传单个文件到 IPFS
+        console.log("=== 步骤2：开始上传更新的文件到 IPFS ===");
+        toast.loading("正在上传文件到 IPFS...", { id: "update-progress" });
+        const ipfsFileName = `encrypted_document_${Date.now()}.bin`;
+        const ipfsResult = await uploadToIPFS(encryptionResult.encryptedData, {
+          fileName: ipfsFileName,
+          fileType: "application/octet-stream",
+          metadata: {
+            uploadedAt: currentTimestamp,
+            encrypted: "true",
+            walletAddress: walletAddress,
+            source: "BlueDoku_DocumentEditor"
+          }
+        });
+
+        const keyData = {
+          encryptionKey: encryptionResult.key,
+          nonce: encryptionResult.nonce,
+          ipfsHash: ipfsResult.IpfsHash,
+          timestamp: ipfsResult.Timestamp
+        };
+        const encryptedKeyData = await encryptWithMetaMask(
+          JSON.stringify(keyData),
+          publicKey
+        );
+
+        // 步骤4：创建更新的文件元数据
+        console.log("=== 步骤4：创建更新的文件元数据 ===");
+        toast.loading("正在创建文件元数据...", { id: "update-progress" });
+
+        const gatewayUrl = `https://gateway.pinata.cloud/ipfs/${ipfsResult.IpfsHash}`;
+
+        const updatedDocumentMetadata = {
+          uid: fileId, // 保持原有的 uid
+          fileName: ipfsFileName,
+          fileType: "application/octet-stream",
+          metadata: {
+            uploadedAt: currentTimestamp,        
+            encrypted: "true",
+            title: newName
+          },
+          ipfsResult: {
+            ipfsHash: ipfsResult.IpfsHash,
+            gatewayUrl: gatewayUrl,
+            pinSize: ipfsResult.PinSize,
+            timestamp: ipfsResult.Timestamp
+          },
+          encryptionInfo: {
+            metamaskEncryptedKeys: encryptedKeyData
+          }
+        };
+
+        console.log("=== 创建的更新文件元数据 ===");
+        console.log(JSON.stringify(updatedDocumentMetadata, null, 2));
+
+        // 步骤5：更新文档集合中的文件
+        console.log("=== 步骤5：更新文档集合中的文件 ===");
+       
+        // 在原始文档元数据中找到对应文件并替换
+        const updatedOriginalMetadata = originalDocumentMetadata.map(doc => 
+          doc.uid === fileId ? updatedDocumentMetadata : doc
+        );
+        setOriginalDocumentMetadata(updatedOriginalMetadata);
+        console.log("=== 更新后的原始文档元数据集合 ===");
+        console.log(JSON.stringify(updatedOriginalMetadata, null, 2));
+
+        // 步骤6：加密整个文档集合
+        console.log("=== 步骤6：开始加密文档集合 ===");
+        toast.loading("正在加密文档集合...", { id: "update-progress" });
+
+        const collectionJSON = JSON.stringify(updatedOriginalMetadata);
+        const collectionEncryptionResult = encryptText(collectionJSON);
+        console.log("文档集合加密结果:", {
+          originalSize: collectionJSON.length,
+          encryptedSize: collectionEncryptionResult.encryptedData.length
+        });
+
+        // 步骤7：上传加密的文档集合到 IPFS
+        console.log("=== 步骤7：上传加密的文档集合到 IPFS ===");
+        toast.loading("正在上传文档集合到 IPFS...", { id: "update-progress" });
+
+        const collectionFileName = `document_collection_${Date.now()}.bin`;
+        const collectionIpfsResult = await uploadToIPFS(collectionEncryptionResult.encryptedData, {
+          fileName: collectionFileName,
+          fileType: "application/octet-stream",
+          metadata: {
+            uploadedAt: currentTimestamp,
+            encrypted: "true",
+            walletAddress: walletAddress,
+            source: "BlueDoku_DocumentCollection",
+            collectionSize: updatedOriginalMetadata.length.toString()
+          }
+        });
+
+        console.log("文档集合 IPFS 上传结果:", collectionIpfsResult);
+
+        // 步骤8：准备集合的 MetaMask 加密密钥
+        console.log("=== 步骤8：MetaMask 加密集合密钥 ===");
+        toast.loading("正在加密集合密钥数据...", { id: "update-progress" });
+
+        const collectionKeyData = {
+          encryptionKey: collectionEncryptionResult.key,
+          nonce: collectionEncryptionResult.nonce,
+          ipfsHash: collectionIpfsResult.IpfsHash,
+          timestamp: collectionIpfsResult.Timestamp
+        };
+
+        const encryptedCollectionMemo = await encryptWithMetaMask(
+          JSON.stringify(collectionKeyData),
+          publicKey
+        );
+
+        console.log("集合密钥 MetaMask 加密成功");
+
+        // 步骤9：初始化合约
+        console.log("=== 步骤9：初始化合约 ===");
+        toast.loading("正在初始化合约...", { id: "update-progress" });
+
+        const contract = getDefaultContract();
+        await contract.init();
+        console.log("合约初始化成功");
+
+        // 步骤10：检查用户 NFT 状态
+        console.log("=== 步骤10：检查用户 NFT 状态 ===");
+        toast.loading("正在检查用户 NFT 状态...", { id: "update-progress" });
+
+        const tokenIds = await contract.getUserTokenIds(walletAddress);
+        console.log("用户拥有的 TokenId 列表:", tokenIds.map(id => id.toString()));
+
+        // 步骤11：更新 DocumentList NFT
+        console.log("=== 步骤11：更新 DocumentList NFT ===");
+        
+        let operation: 'create' | 'update';
+        let tokenId: bigint;
+        let txHash: string;
+
+        if (tokenIds.length === 0) {
+          // 理论上不应该发生，因为更新文件意味着用户已经有 NFT
+          console.log("警告：更新文件但用户没有 NFT，创建新的 DocumentList");
+          toast.loading("正在创建新的文档列表 NFT...", { id: "update-progress" });
+
+          const createResult = await contract.createDocumentListWithDetails(
+            collectionIpfsResult.IpfsHash, 
+            encryptedCollectionMemo
+          );
+          tokenId = createResult.tokenId;
+          txHash = createResult.txHash;
+          operation = 'create';
+
+          console.log("创建 NFT 成功:", {
+            tokenId: tokenId.toString(),
+            txHash: txHash
+          });
+
+        } else {
+          // 更新现有的 DocumentList (使用第一个)
+          console.log("更新现有的 DocumentList");
+          toast.loading("正在更新文档列表 NFT...", { id: "update-progress" });
+
+          tokenId = tokenIds[0];
+          const updateResult = await contract.updateDocumentListWithDetails(
+            tokenId, 
+            collectionIpfsResult.IpfsHash, 
+            encryptedCollectionMemo
+          );
+          txHash = updateResult.txHash;
+          operation = 'update';
+
+          console.log("更新 NFT 成功:", {
+            tokenId: tokenId.toString(),
+            txHash: txHash
+          });
+        }
+
+        toast.loading("等待交易确认...", { id: "update-progress" });
+
+        // 显示最终成功消息
+        toast.success("文件更新成功！", {
+          id: "update-progress",
+          description: `TokenId: ${tokenId.toString()}`,
+          duration: 5000
+        });
+
+        console.log("=== 文件更新完成 ===");
+        console.log("更新结果:", {
+          operation,
+          tokenId: tokenId.toString(),
+          txHash: txHash,
+          collectionIpfsHash: collectionIpfsResult.IpfsHash,
+          documentCount: updatedOriginalMetadata.length,
+          updatedFileId: fileId
+        });
+         
+        // 重新获取用户NFT信息，刷新文件列表
+        console.log("=== 刷新文件列表 ===");
+        await fetchUserNFTs(walletAddress);
+
+      } catch (error) {
+        console.error("文件更新失败:", error);
+        toast.error("文件更新失败", {
+          id: "update-progress",
+          description: error instanceof Error ? error.message : "未知错误",
+          duration: 5000
+        });
+      }
     }
   };
 
@@ -420,6 +890,7 @@ export default function MarkdownManagerPage() {
 
   // 事件处理函数：删除文件（软删除）
   const handleDeleteFile = (fileId: string) => {
+    
     // 将文件标记为已删除，而不是从数组中移除
     setFiles((prevFiles) =>
       prevFiles.map((file) =>
@@ -509,7 +980,7 @@ export default function MarkdownManagerPage() {
         <div className="flex items-center gap-2">
           <LayoutPanelLeft className="h-6 w-6 text-primary" />
           <h1 className="text-lg md:text-xl font-semibold">
-            Web3 Markdown Manager
+            BlueDoku
           </h1>
         </div>
         <ConnectWalletButton
