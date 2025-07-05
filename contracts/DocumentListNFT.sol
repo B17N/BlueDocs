@@ -16,8 +16,9 @@ contract DocumentListNFT is ERC1155, Ownable {
 
     // 用户文档列表信息结构体
     struct DocumentList {
+        uint256 DocumentListTokenId;
         string ipfsHash;         // IPFS哈希，指向包含用户所有文档列表的JSON文件
-        string encryptedAESKey;  // 加密的AES密钥，用于解密文档内容
+        string encryptedMemo;  // 加密的AES密钥，用于解密文档内容
         uint256 createdAt;       // 创建时间戳
         uint256 lastUpdated;     // 最后更新时间戳
     }
@@ -58,22 +59,23 @@ contract DocumentListNFT is ERC1155, Ownable {
     /**
      * @dev 为用户创建文档列表NFT
      * @param _ipfsHash 初始IPFS哈希（包含文档列表的JSON文件
-     * @param _encryptedAESKey 加密的AES密钥
+     * @param _encryptedMemo 加密的AES密钥
      */
     function createDocumentList(
         string memory _ipfsHash,
-        string memory _encryptedAESKey
+        string memory _encryptedMemo
     ) external returns (uint256) {
         require(bytes(_ipfsHash).length > 0, "IPFS hash cannot be empty");
-        require(bytes(_encryptedAESKey).length > 0, "Encrypted AES key cannot be empty");
+        require(bytes(_encryptedMemo).length > 0, "Encrypted AES key cannot be empty");
         
         // 获取当前文档列表ID
         uint256 tokenId = _currentTokenId;
         
         // 创建用户文档列表信息
         DocumentLists[tokenId] = DocumentList({
+            DocumentListTokenId: tokenId,
             ipfsHash: _ipfsHash,
-            encryptedAESKey: _encryptedAESKey,
+            encryptedMemo: _encryptedMemo,
             createdAt: block.timestamp,
             lastUpdated: block.timestamp
         });
@@ -98,24 +100,24 @@ contract DocumentListNFT is ERC1155, Ownable {
      * @dev 更新用户的文档列表和AES密钥（文档更新时总是使用新的AES密钥）
      * @param _tokenId 要更新的文档列表ID
      * @param _newIpfsHash 新的IPFS哈希
-     * @param _newEncryptedAESKey 新的加密AES密钥
+     * @param _newencryptedMemo 新的加密AES密钥
      */
     function updateDocumentList(
         uint256 _tokenId, 
         string memory _newIpfsHash, 
-        string memory _newEncryptedAESKey
+        string memory _newencryptedMemo
     ) external {
         // 验证NFT是否存在且调用者是所有者
         require(tokenIdToUser[_tokenId] == msg.sender, "Not authorized or NFT does not exist");
         require(bytes(_newIpfsHash).length > 0, "IPFS hash cannot be empty");
-        require(bytes(_newEncryptedAESKey).length > 0, "Encrypted AES key cannot be empty");
+        require(bytes(_newencryptedMemo).length > 0, "Encrypted AES key cannot be empty");
         
         // 保存旧IPFS哈希用于事件记录
         string memory oldIpfsHash = DocumentLists[_tokenId].ipfsHash;
         
         // 更新文档信息和AES密钥
         DocumentLists[_tokenId].ipfsHash = _newIpfsHash;
-        DocumentLists[_tokenId].encryptedAESKey = _newEncryptedAESKey;
+        DocumentLists[_tokenId].encryptedMemo = _newencryptedMemo;
         DocumentLists[_tokenId].lastUpdated = block.timestamp;
         
         // 触发更新事件

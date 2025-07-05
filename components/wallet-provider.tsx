@@ -200,7 +200,9 @@ export const WalletProvider = ({ children }: { children: ReactNode }) => {
   };
 
   // 组件挂载时自动检测钱包连接状态，只执行一次
+
   useEffect(() => {
+    return;
     // 日志：检测钱包连接
     console.log("[WALLET_PROVIDER_EFFECT] Checking wallet connection", {
       globalHasRequestedPublicKey,

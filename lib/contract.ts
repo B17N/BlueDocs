@@ -3,9 +3,9 @@ import { ethers } from 'ethers';
 // 合约 ABI - 根据 DocumentListNFT.sol 生成
 const DOCUMENT_LIST_NFT_ABI = [
   // 核心功能
-  "function createDocumentList(string memory _ipfsHash, string memory _encryptedAESKey) external returns (uint256)",
-  "function updateDocumentList(uint256 _tokenId, string memory _newIpfsHash, string memory _newEncryptedAESKey) external",
-  "function getDocumentListByTokenId(uint256 _tokenId) external view returns (tuple(string ipfsHash, string encryptedAESKey, uint256 createdAt, uint256 lastUpdated))",
+  "function createDocumentList(string memory _ipfsHash, string memory _encryptedMemo) external returns (uint256)",
+  "function updateDocumentList(uint256 _tokenId, string memory _newIpfsHash, string memory _newencryptedMemo) external",
+  "function getDocumentListByTokenId(uint256 _tokenId) external view returns (tuple(uint256,string,string,uint256,uint256))",
   "function getUserTokenIds(address _user) external view returns (uint256[] memory)",
   "function getCurrentTokenId() external view returns (uint256)",
   
@@ -20,6 +20,7 @@ const DOCUMENT_LIST_NFT_ABI = [
 
 // 文档列表结构
 export interface DocumentList {
+  DocumentListTokenId: bigint;
   ipfsHash: string;
   encryptedMemo: string;
   createdAt: bigint;
@@ -195,12 +196,15 @@ export class DocumentListNFTContract {
     if (!this.contract) throw new Error('合约未初始化');
     
     const result = await this.contract.getDocumentListByTokenId(tokenId);
+    console.log(result);
     
+    // 处理结构体返回值 - 使用数组访问方式更可靠
     return {
-      ipfsHash: result[0],
-      encryptedMemo: result[1],
-      createdAt: result[2],
-      lastUpdated: result[3]
+      DocumentListTokenId: result[0],
+      ipfsHash: result[1],
+      encryptedMemo: result[2],
+      createdAt: result[3],
+      lastUpdated: result[4]
     };
   }
 
