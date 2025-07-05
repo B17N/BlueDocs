@@ -6,43 +6,43 @@ import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/utils/Strings.sol";
 
 /**
- * @title UserDocumentNFT
- * @dev ERC1155合约，每个用户地址对应一个唯一的NFT
- * 每个NFT代表用户的所有文档，存储在IPFS上
+ * @title DocumentListNFT
+ * @dev ERC1155合约，用于管理用户的文档列表NFT
+ * 每个NFT代表用户的一个文档列表，存储在IPFS上
  * 这样可以大大降低链上成本，同时保持去中心化存储
  */
-contract UserDocumentNFT is ERC1155, Ownable {
+contract DocumentListNFT is ERC1155, Ownable {
     using Strings for uint256;
 
-    // 用户文档信息结构体
-    struct UserDocuments {
+    // 用户文档列表信息结构体
+    struct DocumentList {
         string ipfsHash;         // IPFS哈希，指向包含用户所有文档列表的JSON文件
         string encryptedAESKey;  // 加密的AES密钥，用于解密文档内容
         uint256 createdAt;       // 创建时间戳
         uint256 lastUpdated;     // 最后更新时间戳
     }
 
-    // 代币ID到文档信息的映射
-    mapping(uint256 => UserDocuments) public userDocuments;
+    // 文档列表ID到文档列表信息的映射
+    mapping(uint256 => DocumentList) public DocumentLists;
     
-    // 用户地址到拥有的代币ID列表的映射
+    // 用户地址到拥有的文档列表ID列表的映射
     mapping(address => uint256[]) public userTokenIds;
     
-    // 代币ID到用户地址的映射
+    // 文档列表ID到用户地址的映射
     mapping(uint256 => address) public tokenIdToUser;
     
-    // 当前可用的代币ID计数器
+    // 当前可用的文档列表ID计数器
     uint256 private _currentTokenId = 1;
     
-    // 用户文档创建事件
-    event UserDocumentsCreated(
+    // 用户文档列表创建事件
+    event DocumentListCreated(
         address indexed user,
         uint256 indexed tokenId,
         string ipfsHash
     );
     
-    // 用户文档更新事件
-    event UserDocumentsUpdated(
+    // 用户文档列表更新事件
+    event DocumentListUpdated(
         address indexed user,
         uint256 indexed tokenId,
         string oldIpfsHash,
@@ -56,29 +56,29 @@ contract UserDocumentNFT is ERC1155, Ownable {
     constructor(string memory _uri) ERC1155(_uri) Ownable(msg.sender) {}
 
     /**
-     * @dev 为用户创建文档NFT（
-     * @param _ipfsHash 初始IPFS哈希（包含文档列表的JSON文件）
+     * @dev 为用户创建文档列表NFT
+     * @param _ipfsHash 初始IPFS哈希（包含文档列表的JSON文件
      * @param _encryptedAESKey 加密的AES密钥
      */
-    function createUserDocuments(
+    function createDocumentList(
         string memory _ipfsHash,
         string memory _encryptedAESKey
     ) external returns (uint256) {
         require(bytes(_ipfsHash).length > 0, "IPFS hash cannot be empty");
         require(bytes(_encryptedAESKey).length > 0, "Encrypted AES key cannot be empty");
         
-        // 获取当前token ID
+        // 获取当前文档列表ID
         uint256 tokenId = _currentTokenId;
         
-        // 创建用户文档信息
-        userDocuments[tokenId] = UserDocuments({
+        // 创建用户文档列表信息
+        DocumentLists[tokenId] = DocumentList({
             ipfsHash: _ipfsHash,
             encryptedAESKey: _encryptedAESKey,
             createdAt: block.timestamp,
             lastUpdated: block.timestamp
         });
         
-        // 建立用户和代币ID的映射
+        // 建立用户和文档列表ID的映射
         userTokenIds[msg.sender].push(tokenId);
         tokenIdToUser[tokenId] = msg.sender;
         
@@ -86,7 +86,7 @@ contract UserDocumentNFT is ERC1155, Ownable {
         _mint(msg.sender, tokenId, 1, "");
         
         // 触发创建事件
-        emit UserDocumentsCreated(msg.sender, tokenId, _ipfsHash);
+        emit DocumentListCreated(msg.sender, tokenId, _ipfsHash);
         
         // 递增token ID计数器
         _currentTokenId++;
@@ -95,12 +95,12 @@ contract UserDocumentNFT is ERC1155, Ownable {
     }
 
     /**
-     * @dev 更新用户的文档和AES密钥（文档更新时总是使用新的AES密钥）
-     * @param _tokenId 要更新的代币ID
+     * @dev 更新用户的文档列表和AES密钥（文档更新时总是使用新的AES密钥）
+     * @param _tokenId 要更新的文档列表ID
      * @param _newIpfsHash 新的IPFS哈希
      * @param _newEncryptedAESKey 新的加密AES密钥
      */
-    function updateDocuments(
+    function updateDocumentList(
         uint256 _tokenId, 
         string memory _newIpfsHash, 
         string memory _newEncryptedAESKey
@@ -111,69 +111,42 @@ contract UserDocumentNFT is ERC1155, Ownable {
         require(bytes(_newEncryptedAESKey).length > 0, "Encrypted AES key cannot be empty");
         
         // 保存旧IPFS哈希用于事件记录
-        string memory oldIpfsHash = userDocuments[_tokenId].ipfsHash;
+        string memory oldIpfsHash = DocumentLists[_tokenId].ipfsHash;
         
         // 更新文档信息和AES密钥
-        userDocuments[_tokenId].ipfsHash = _newIpfsHash;
-        userDocuments[_tokenId].encryptedAESKey = _newEncryptedAESKey;
-        userDocuments[_tokenId].lastUpdated = block.timestamp;
+        DocumentLists[_tokenId].ipfsHash = _newIpfsHash;
+        DocumentLists[_tokenId].encryptedAESKey = _newEncryptedAESKey;
+        DocumentLists[_tokenId].lastUpdated = block.timestamp;
         
         // 触发更新事件
-        emit UserDocumentsUpdated(msg.sender, _tokenId, oldIpfsHash, _newIpfsHash);
+        emit DocumentListUpdated(msg.sender, _tokenId, oldIpfsHash, _newIpfsHash);
     }
 
     /**
-     * @dev 通过代币ID获取文档信息
-     * @param _tokenId 代币ID
+     * @dev 通过文档列表ID获取文档列表信息
+     * @param _tokenId 文档列表ID
      * @return 文档信息结构体
      */
-    function getDocumentsByTokenId(uint256 _tokenId) external view returns (UserDocuments memory) {
+    function getDocumentListByTokenId(uint256 _tokenId) external view returns (DocumentList memory) {
         require(tokenIdToUser[_tokenId] != address(0), "Token does not exist");
-        return userDocuments[_tokenId];
+        return DocumentLists[_tokenId];
     }
 
     /**
-     * @dev 获取用户拥有的所有代币ID
+     * @dev 获取用户拥有的所有文档列表ID
      * @param _user 用户地址
-     * @return 用户的代币ID数组
+     * @return 用户的文档列表ID数组
      */
     function getUserTokenIds(address _user) external view returns (uint256[] memory) {
         return userTokenIds[_user];
     }
 
     /**
-     * @dev 检查用户是否有文档NFT
-     * @param _user 用户地址
-     * @return 是否至少拥有一个NFT
-     */
-    function hasUserDocuments(address _user) external view returns (bool) {
-        return userTokenIds[_user].length > 0;
-    }
-
-    /**
-     * @dev 获取当前最大的代币ID
-     * @return 当前代币ID计数器值
+     * @dev 获取当前最大的文档列表ID
+     * @return 当前文档列表ID计数器值
      */
     function getCurrentTokenId() external view returns (uint256) {
         return _currentTokenId;
-    }
-
-    /**
-     * @dev 重写URI函数，返回特定代币的URI
-     * @param _tokenId 代币ID
-     * @return 代币的元数据URI
-     */
-    function uri(uint256 _tokenId) public view virtual override returns (string memory) {
-        require(tokenIdToUser[_tokenId] != address(0), "URI query for nonexistent token");
-        return string(abi.encodePacked(super.uri(_tokenId), _tokenId.toString()));
-    }
-
-    /**
-     * @dev 更新合约的基础URI（仅所有者可调用）
-     * @param _newURI 新的基础URI
-     */
-    function setURI(string memory _newURI) external onlyOwner {
-        _setURI(_newURI);
     }
 
     /**
@@ -202,9 +175,9 @@ contract UserDocumentNFT is ERC1155, Ownable {
     }
 
     /**
-     * @dev 从用户的token列表中移除指定token
+     * @dev 从用户的文档列表中移除指定文档列表ID
      * @param _user 用户地址
-     * @param _tokenId 要移除的代币ID
+     * @param _tokenId 要移除的文档列表ID
      */
     function _removeTokenFromUser(address _user, uint256 _tokenId) private {
         uint256[] storage tokens = userTokenIds[_user];
