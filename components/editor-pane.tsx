@@ -186,12 +186,12 @@ export function EditorPane({ file, onUpdateFile, isNew, isMobile, isProcessing, 
               onClick={() => setIsShareDialogOpen(true)}
               disabled={isNew}
               title={isNew ? "Publish the file first to enable sharing" : "Share file"}
-              className="flex-1"
+              className="flex-1 hidden"
             >
               <Share2 className="h-4 w-4 mr-2" />
               Share
             </Button>
-            <Button variant="outline" onClick={() => setIsHistoryOpen(true)} className="flex-1">
+            <Button variant="outline" onClick={() => setIsHistoryOpen(true)} className="flex-1 hidden">
               <History className="h-4 w-4 mr-2" />
               History
             </Button>

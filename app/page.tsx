@@ -103,7 +103,7 @@ export default function MarkdownManagerPage() {
             content: "", // 暂时为空
           },
         ],
-        isDeleted: false,
+        isDeleted: doc.isDeleted || false, // 从文档元数据中读取 isDeleted 状态
       };
       
       fileDataArray.push(fileData);
@@ -910,21 +910,210 @@ export default function MarkdownManagerPage() {
   };
 
   // 事件处理函数：删除文件（软删除）
-  const handleDeleteFile = (fileId: string) => {
+  const handleDeleteFile = async (fileId: string) => {
     
-    // 将文件标记为已删除，而不是从数组中移除
-    setFiles((prevFiles) =>
-      prevFiles.map((file) =>
-        file.id === fileId ? { ...file, isDeleted: true } : file
-      )
-    );
-
-    // 如果删除的是当前选中的文件，选择下一个未删除的文件
-    if (selectedFile?.id === fileId) {
-      const nextFile = files.find((f) => !f.isDeleted && f.id !== fileId);
-      setSelectedFile(nextFile || null);
+    if (isProcessing) {
+      alert("Please wait for the current file processing to complete.");
+      return;
     }
-    toast.success("File moved to trash."); // 显示删除成功提示
+    // 前置检查
+    if (!isWalletConnected || !walletAddress) {
+      toast.error("Please connect your wallet first");
+      return;
+    }
+
+    if (!publicKey) {
+      toast.error("Unable to get wallet public key, please reconnect your wallet");
+      return;
+    }
+
+    // 检查文件是否存在
+    const fileToDelete = files.find((f) => f.id === fileId);
+    if (!fileToDelete) {
+      toast.error("File not found");
+      return;
+    }
+
+    // 检查文件是否已经被删除
+    if (fileToDelete.isDeleted) {
+      toast.error("File is already deleted");
+      return;
+    }
+
+    // 设置处理状态
+    setIsProcessing(true);
+
+    try {
+      // 显示开始处理的提示
+      toast.loading("Processing file deletion...", { id: "delete-progress" });
+
+      // 步骤1：软删除标记 - 更新 originalDocumentMetadata
+      console.log("=== 步骤1：软删除标记 ===");
+      toast.loading("Marking file as deleted...", { id: "delete-progress" });
+      
+      const currentTimestamp = new Date().toISOString();
+      const updatedOriginalMetadata = originalDocumentMetadata.map(doc => 
+        doc.uid === fileId 
+          ? { ...doc, isDeleted: true, deletedAt: currentTimestamp }
+          : doc
+      );
+      setOriginalDocumentMetadata(updatedOriginalMetadata);
+
+      // 同时更新前端文件列表
+      setFiles((prevFiles) =>
+        prevFiles.map((file) =>
+          file.id === fileId ? { ...file, isDeleted: true } : file
+        )
+      );
+
+      // 如果删除的是当前选中的文件，选择下一个未删除的文件
+      if (selectedFile?.id === fileId) {
+        const nextFile = files.find((f) => !f.isDeleted && f.id !== fileId);
+        setSelectedFile(nextFile || null);
+      }
+
+      console.log("=== 软删除标记完成 ===");
+      console.log("更新后的文档元数据集合:", JSON.stringify(updatedOriginalMetadata, null, 2));
+
+      // 步骤2：加密整个文档集合
+      console.log("=== 步骤2：开始加密文档集合 ===");
+      toast.loading("Encrypting document collection...", { id: "delete-progress" });
+
+      const collectionJSON = JSON.stringify(updatedOriginalMetadata);
+      const collectionEncryptionResult = encryptText(collectionJSON);
+      console.log("文档集合加密结果:", {
+        originalSize: collectionJSON.length,
+        encryptedSize: collectionEncryptionResult.encryptedData.length
+      });
+
+      // 步骤3：上传加密的文档集合到 IPFS
+      console.log("=== 步骤3：上传加密的文档集合到 IPFS ===");
+      toast.loading("Uploading document collection to IPFS...", { id: "delete-progress" });
+
+      const collectionFileName = `document_collection_${Date.now()}.bin`;
+      const collectionIpfsResult = await uploadToIPFS(collectionEncryptionResult.encryptedData, {
+        fileName: collectionFileName,
+        fileType: "application/octet-stream",
+        metadata: {
+          uploadedAt: currentTimestamp,
+          encrypted: "true",
+          walletAddress: walletAddress,
+          source: "BlueDoku_DocumentCollection",
+          collectionSize: updatedOriginalMetadata.length.toString(),
+          operation: "delete"
+        }
+      });
+
+      console.log("文档集合 IPFS 上传结果:", collectionIpfsResult);
+
+      // 步骤4：准备集合的 MetaMask 加密密钥
+      console.log("=== 步骤4：MetaMask 加密集合密钥 ===");
+      toast.loading("Encrypting collection key data...", { id: "delete-progress" });
+
+      const collectionKeyData = {
+        encryptionKey: collectionEncryptionResult.key,
+        nonce: collectionEncryptionResult.nonce,
+        ipfsHash: collectionIpfsResult.IpfsHash,
+        timestamp: collectionIpfsResult.Timestamp
+      };
+
+      const encryptedCollectionMemo = await encryptWithMetaMask(
+        JSON.stringify(collectionKeyData),
+        publicKey
+      );
+
+      console.log("集合密钥 MetaMask 加密成功");
+
+      // 步骤5：初始化合约
+      console.log("=== 步骤5：初始化合约 ===");
+      toast.loading("Initializing contract...", { id: "delete-progress" });
+
+      const contract = getDefaultContract();
+      await contract.init();
+      console.log("合约初始化成功");
+
+      // 步骤6：检查用户 NFT 状态
+      console.log("=== 步骤6：检查用户 NFT 状态 ===");
+      toast.loading("Checking user NFT status...", { id: "delete-progress" });
+
+      const tokenIds = await contract.getUserTokenIds(walletAddress);
+      console.log("用户拥有的 TokenId 列表:", tokenIds.map(id => id.toString()));
+
+      // 步骤7：更新 DocumentList NFT
+      console.log("=== 步骤7：更新 DocumentList NFT ===");
+      
+      if (tokenIds.length === 0) {
+        throw new Error("No NFT found for this user. Cannot delete file without existing NFT.");
+      }
+
+      // 更新现有的 DocumentList (使用第一个)
+      console.log("更新现有的 DocumentList");
+      toast.loading("Updating document list NFT...", { id: "delete-progress" });
+
+      const tokenId = tokenIds[0];
+      const updateResult = await contract.updateDocumentListWithDetails(
+        tokenId, 
+        collectionIpfsResult.IpfsHash, 
+        encryptedCollectionMemo
+      );
+      const txHash = updateResult.txHash;
+
+      console.log("更新 NFT 成功:", {
+        tokenId: tokenId.toString(),
+        txHash: txHash
+      });
+
+      // 步骤8：等待交易确认
+      console.log("=== 步骤8：等待交易确认 ===");
+      toast.loading("Waiting for transaction confirmation...", { id: "delete-progress" });
+
+      // 显示最终成功消息
+      toast.success("File deleted successfully!", {
+        id: "delete-progress",
+        description: `TokenId: ${tokenId.toString()}`,
+        duration: 5000
+      });
+
+      console.log("=== 文件删除完成 ===");
+      console.log("删除结果:", {
+        operation: 'delete',
+        tokenId: tokenId.toString(),
+        txHash: txHash,
+        collectionIpfsHash: collectionIpfsResult.IpfsHash,
+        documentCount: updatedOriginalMetadata.length,
+        deletedFileId: fileId
+      });
+       
+      // 步骤9：重新获取用户NFT信息，刷新文件列表
+      console.log("=== 步骤9：刷新文件列表 ===");
+      await fetchUserNFTs(walletAddress);
+
+    } catch (error) {
+      console.error("文件删除失败:", error);
+      toast.error("File deletion failed", {
+        id: "delete-progress",
+        description: error instanceof Error ? error.message : "Unknown error",
+        duration: 5000
+      });
+      
+      // 回滚前端状态
+      setFiles((prevFiles) =>
+        prevFiles.map((file) =>
+          file.id === fileId ? { ...file, isDeleted: false } : file
+        )
+      );
+      
+      // 回滚 originalDocumentMetadata
+      const rolledBackMetadata = originalDocumentMetadata.map(doc => 
+        doc.uid === fileId 
+          ? { ...doc, isDeleted: false, deletedAt: undefined }
+          : doc
+      );
+      setOriginalDocumentMetadata(rolledBackMetadata);
+      
+    } finally {
+      setIsProcessing(false);
+    }
   };
 
   // 渲染函数：桌面端布局（左侧文件列表 + 右侧编辑器）
