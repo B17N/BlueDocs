@@ -964,7 +964,7 @@ export default function MarkdownManagerPage() {
           : doc
       );
       setOriginalDocumentMetadata(updatedOriginalMetadata);
-
+/*
       // 同时更新前端文件列表
       setFiles((prevFiles) =>
         prevFiles.map((file) =>
@@ -977,7 +977,7 @@ export default function MarkdownManagerPage() {
         const nextFile = files.find((f) => !f.isDeleted && f.id !== fileId);
         setSelectedFile(nextFile || null);
       }
-
+*/
       console.log("=== 软删除标记完成 ===");
       console.log("更新后的文档元数据集合:", JSON.stringify(updatedOriginalMetadata, null, 2));
 
@@ -1093,7 +1093,10 @@ export default function MarkdownManagerPage() {
       // 步骤9：重新获取用户NFT信息，刷新文件列表
       console.log("=== 步骤9：刷新文件列表 ===");
       await fetchUserNFTs(walletAddress);
-
+      setSelectedFile(null);
+      setIsEditingNewFile(false);
+      setIsProcessing(false);
+      
     } catch (error) {
       console.error("文件删除失败:", error);
       toast.error("File deletion failed", {

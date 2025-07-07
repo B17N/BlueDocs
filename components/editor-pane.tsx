@@ -200,7 +200,7 @@ export function EditorPane({ file, onUpdateFile, isNew, isMobile, isProcessing, 
       </div>
 
       <div className="flex-1 flex flex-col gap-4 overflow-hidden">
-        <div className="flex flex-col border rounded-lg overflow-hidden">
+        <div className="flex-1 flex flex-col border rounded-lg overflow-hidden">
           {/* Toolbar */}
           <div className="flex items-center gap-1 p-2 border-b bg-muted/30 flex-wrap">
             <Button variant="ghost" size="sm" className="h-8 w-8 p-0">
