@@ -905,8 +905,14 @@ export default function MarkdownManagerPage() {
   };
 
   // 事件处理函数：刷新文件列表
-  const handleRefreshFiles = () => {
-    toast.info("Refreshing file list..."); // 显示刷新提示
+  const handleRefreshFiles = async () => {
+    if (!isWalletConnected || !walletAddress) {
+      toast.error("Please connect your wallet first");
+      return;
+    }
+
+    // 直接调用 fetchUserNFTs 重新获取数据，就像页面加载时一样
+    await fetchUserNFTs(walletAddress);
   };
 
   // 事件处理函数：删除文件（软删除）
