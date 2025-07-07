@@ -35,12 +35,13 @@ interface EditorPaneProps {
   onUpdateFile: (fileId: string, newName: string, newContent: string) => void
   isNew: boolean
   isMobile: boolean
+  isProcessing: boolean
   onBack: () => void
 }
 
 type ButtonState = "idle" | "encrypting" | "uploading" | "saving" | "success" | "error"
 
-export function EditorPane({ file, onUpdateFile, isNew, isMobile, onBack }: EditorPaneProps) {
+export function EditorPane({ file, onUpdateFile, isNew, isMobile, isProcessing, onBack }: EditorPaneProps) {
   const [fileName, setFileName] = useState(file.name)
   const [markdownContent, setMarkdownContent] = useState(file.content)
   const [isHistoryOpen, setIsHistoryOpen] = useState(false)
@@ -77,22 +78,21 @@ export function EditorPane({ file, onUpdateFile, isNew, isMobile, onBack }: Edit
   }
 
   const handleEncryptAndUpdate = async () => {
-    setButtonState("encrypting")
-    await new Promise((resolve) => setTimeout(resolve, 1000))
-    setButtonState("uploading")
-    await new Promise((resolve) => setTimeout(resolve, 1000))
-    setButtonState("saving")
-    await new Promise((resolve) => setTimeout(resolve, 1000))
     onUpdateFile(file.id, fileName, markdownContent)
     setInitialFileName(fileName)
     setInitialMarkdownContent(markdownContent)
     setIsModified(false)
-    setButtonState("success")
-    await new Promise((resolve) => setTimeout(resolve, 1500))
-    setButtonState("idle")
   }
 
   const getButtonContent = () => {
+    if (isProcessing) {
+      return (
+        <>
+          <Loader2 className="h-4 w-4 mr-2 animate-spin" /> Processing...
+        </>
+      )
+    }
+
     switch (buttonState) {
       case "encrypting":
         return (
@@ -163,10 +163,19 @@ export function EditorPane({ file, onUpdateFile, isNew, isMobile, onBack }: Edit
           <Button
             onClick={handleEncryptAndUpdate}
             disabled={
+              isProcessing ||
               (buttonState !== "idle" && buttonState !== "success" && buttonState !== "error") ||
               (!isModified && !isNew)
             }
-            title={!isModified && !isNew ? "No changes to save" : isNew ? "Publish this new file" : "Save your changes"}
+            title={
+              isProcessing 
+                ? "Please wait, processing..."
+                : !isModified && !isNew 
+                  ? "No changes to save" 
+                  : isNew 
+                    ? "Publish this new file" 
+                    : "Save your changes"
+            }
             className="flex-1"
           >
             {getButtonContent()}

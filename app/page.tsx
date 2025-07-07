@@ -75,6 +75,8 @@ export default function MarkdownManagerPage() {
   const [originalDocumentMetadata, setOriginalDocumentMetadata] = useState<any[]>([]);
   // 状态管理：是否正在解密文件
   const [isDecryptingFile, setIsDecryptingFile] = useState(false);
+  // 状态管理：是否正在处理文件（发布或更新）
+  const [isProcessing, setIsProcessing] = useState(false);
   // 响应式设计：检测是否为移动设备（屏幕宽度小于768px）
   const isMobile = useMediaQuery("(max-width: 768px)");
 
@@ -113,17 +115,17 @@ export default function MarkdownManagerPage() {
   // 解密单个文件内容的函数
   const decryptSingleFile = async (fileId: string): Promise<string> => {
     if (!walletAddress) {
-      throw new Error("钱包未连接");
+      throw new Error("Wallet not connected");
     }
 
     // 找到对应的文档元数据
     const docMetadata = originalDocumentMetadata.find(doc => doc.uid === fileId);
     if (!docMetadata) {
-      throw new Error("找不到文档元数据");
+      throw new Error("Document metadata not found");
     }
 
     if (!docMetadata.encryptionInfo?.metamaskEncryptedKeys) {
-      throw new Error("文档缺少加密密钥信息");
+      throw new Error("Document missing encryption key information");
     }
 
     try {
@@ -210,7 +212,7 @@ export default function MarkdownManagerPage() {
           
         } catch (decryptError) {
           console.error("解密文档集合失败:", decryptError);
-          toast.error("解密文档集合失败", {
+          toast.error("Failed to decrypt document collection:", {
             description: decryptError instanceof Error ? decryptError.message : "解密失败"
           });
         }
@@ -224,7 +226,7 @@ export default function MarkdownManagerPage() {
     } catch (error) {
       console.error("Account file list error", error);
       toast.error("Account file list error", {
-        description: error instanceof Error ? error.message : "未知错误"
+        description: error instanceof Error ? error.message : "Unknown error"
       });
       setUserNFTs([]);
       setUserTokenIds([]);
@@ -288,10 +290,16 @@ export default function MarkdownManagerPage() {
 
   // 事件处理函数：选择文件
   const handleSelectFile = async (fileId: string) => {
+    // 检查是否正在处理文件
+    if (isProcessing) {
+      alert("Please wait for the current file processing to complete before selecting a file.");
+      return;
+    }
+
     // 检查是否有未保存的新文件
     if (isEditingNewFile) {
       const shouldContinue = window.confirm(
-        "您有一个未保存的新文件。如果继续选择其他文件，新文件的更改将会丢失。是否继续？"
+        "You have an unsaved new file. If you continue creating a new file, the changes in the current file will be lost. Do you want to continue?"
       );
       if (!shouldContinue) {
         return;
@@ -318,7 +326,7 @@ export default function MarkdownManagerPage() {
     // 如果文件内容为空，需要解密
     setIsDecryptingFile(true);
     try {
-      toast.loading("正在解密文件内容...", { id: "decrypt-file" });
+      toast.loading("Decrypting file content…", { id: "decrypt-file" });
       
       const decryptedContent = await decryptSingleFile(fileId);
       
@@ -340,13 +348,13 @@ export default function MarkdownManagerPage() {
       setSelectedFile(updatedFile);
       setIsEditingNewFile(false);
       
-      toast.success("文件解密成功！", { id: "decrypt-file" });
+      toast.success("File decrypted successfully!", { id: "decrypt-file" });
       
     } catch (error) {
       console.error("解密文件失败:", error);
-      toast.error("解密文件失败", { 
+      toast.error("Failed to decrypt file", { 
         id: "decrypt-file",
-        description: error instanceof Error ? error.message : "解密失败"
+        description: error instanceof Error ? error.message : "Decryption failed"
       });
     } finally {
       setIsDecryptingFile(false);
@@ -355,10 +363,16 @@ export default function MarkdownManagerPage() {
 
   // 事件处理函数：创建新文件
   const handleNewFile = () => {
+    // 检查是否正在处理文件
+    if (isProcessing) {
+      alert("Please wait for the current file processing to complete before creating a new file.");
+      return;
+    }
+
     // 检查是否已经有未保存的新文件
     if (isEditingNewFile) {
       const shouldContinue = window.confirm(
-        "您有一个未保存的新文件。如果继续创建新文件，当前文件的更改将会丢失。是否继续？"
+        "You have an unsaved new file. If you continue creating a new file, the changes in the current file will be lost. Do you want to continue?"
       );
       if (!shouldContinue) {
         return;
@@ -397,36 +411,39 @@ export default function MarkdownManagerPage() {
     const existingFile = files.find((f) => f.id === fileId);
     const currentTimestamp = new Date().toISOString();
 
+    // 设置处理状态
+    setIsProcessing(true);
+
     // 只处理新文件发布
     if (isEditingNewFile && selectedFile?.id === fileId) {
       try {
         // 前置检查
         if (!isWalletConnected || !walletAddress) {
-          toast.error("请先连接钱包");
+          toast.error("Please connect your wallet first");
           return;
         }
 
         if (!publicKey) {
-          toast.error("无法获取钱包公钥，请重新连接钱包");
+          toast.error("Unable to get wallet public key, please reconnect your wallet");
           return;
         }
 
         if (!newContent.trim()) {
-          toast.error("文件内容不能为空");
+          toast.error("File content cannot be empty");
           return;
         }
 
         if (!newName.trim()) {
-          toast.error("文件名不能为空");
+          toast.error("File name cannot be empty");
           return;
         }
 
         // 显示开始处理的提示
-        toast.loading("正在处理文件发布...", { id: "publish-progress" });
+        toast.loading("Processing file publication...", { id: "publish-progress" });
 
         // 步骤1：加密单个文件内容
         console.log("=== 步骤1-开始加密文件内容 ===");
-        toast.loading("正在加密文件内容...", { id: "publish-progress" });
+        toast.loading("Encrypting file content...", { id: "publish-progress" });
         
         const encryptionResult = encryptText(newContent);
 
@@ -434,7 +451,7 @@ export default function MarkdownManagerPage() {
 
         // 步骤2：上传单个文件到 IPFS
         console.log("=== 步骤2：开始上传文件到 IPFS ===");
-        toast.loading("正在上传文件到 IPFS...", { id: "publish-progress" });
+        toast.loading("Uploading file to IPFS...", { id: "publish-progress" });
         const ipfsFileName = `encrypted_document_${Date.now()}.bin`;
         const ipfsResult = await uploadToIPFS(encryptionResult.encryptedData, {
           fileName: ipfsFileName,
@@ -460,7 +477,7 @@ export default function MarkdownManagerPage() {
 
         // 步骤4：创建文件元数据
         console.log("=== 步骤4：创建文件元数据 ===");
-        toast.loading("正在创建文件元数据...", { id: "publish-progress" });
+        toast.loading("Creating file metadata...", { id: "publish-progress" });
 
         const uid = crypto.randomUUID();
         const gatewayUrl = `https://gateway.pinata.cloud/ipfs/${ipfsResult.IpfsHash}`;
@@ -499,7 +516,7 @@ export default function MarkdownManagerPage() {
 
         // 步骤6：加密整个文档集合
         console.log("=== 步骤6：开始加密文档集合 ===");
-        toast.loading("正在加密文档集合...", { id: "publish-progress" });
+        toast.loading("Encrypting document collection...", { id: "publish-progress" });
 
         const collectionJSON = JSON.stringify(updatedOriginalMetadata);
         const collectionEncryptionResult = encryptText(collectionJSON);
@@ -510,7 +527,7 @@ export default function MarkdownManagerPage() {
 
         // 步骤7：上传加密的文档集合到 IPFS
         console.log("=== 步骤7：上传加密的文档集合到 IPFS ===");
-        toast.loading("正在上传文档集合到 IPFS...", { id: "publish-progress" });
+        toast.loading("Uploading document collection to IPFS...", { id: "publish-progress" });
 
         const collectionFileName = `document_collection_${Date.now()}.bin`;
         const collectionIpfsResult = await uploadToIPFS(collectionEncryptionResult.encryptedData, {
@@ -529,7 +546,7 @@ export default function MarkdownManagerPage() {
 
         // 步骤8：准备集合的 MetaMask 加密密钥
         console.log("=== 步骤8：MetaMask 加密集合密钥 ===");
-        toast.loading("正在加密集合密钥数据...", { id: "publish-progress" });
+        toast.loading("Encrypting collection key data...", { id: "publish-progress" });
 
         const collectionKeyData = {
           encryptionKey: collectionEncryptionResult.key,
@@ -547,7 +564,7 @@ export default function MarkdownManagerPage() {
 
         // 步骤9：初始化合约
         console.log("=== 步骤9：初始化合约 ===");
-        toast.loading("正在初始化合约...", { id: "publish-progress" });
+        toast.loading("Initializing contract...", { id: "publish-progress" });
 
         const contract = getDefaultContract();
         await contract.init();
@@ -555,7 +572,7 @@ export default function MarkdownManagerPage() {
 
         // 步骤10：检查用户 NFT 状态
         console.log("=== 步骤10：检查用户 NFT 状态 ===");
-        toast.loading("正在检查用户 NFT 状态...", { id: "publish-progress" });
+        toast.loading("Checking user NFT status...", { id: "publish-progress" });
 
         const tokenIds = await contract.getUserTokenIds(walletAddress);
         console.log("用户拥有的 TokenId 列表:", tokenIds.map(id => id.toString()));
@@ -570,7 +587,7 @@ export default function MarkdownManagerPage() {
         if (tokenIds.length === 0) {
           // 创建新的 DocumentList
           console.log("用户没有 NFT，创建新的 DocumentList");
-          toast.loading("正在创建新的文档列表 NFT...", { id: "publish-progress" });
+          toast.loading("Creating new document list NFT...", { id: "publish-progress" });
 
           const createResult = await contract.createDocumentListWithDetails(
             collectionIpfsResult.IpfsHash, 
@@ -588,7 +605,7 @@ export default function MarkdownManagerPage() {
         } else {
           // 更新现有的 DocumentList (使用第一个)
           console.log("用户有 NFT，更新现有的 DocumentList");
-          toast.loading("正在更新文档列表 NFT...", { id: "publish-progress" });
+          toast.loading("Updating document list NFT...", { id: "publish-progress" });
 
           tokenId = tokenIds[0];
           const updateResult = await contract.updateDocumentListWithDetails(
@@ -605,11 +622,11 @@ export default function MarkdownManagerPage() {
           });
         }
 
-        toast.loading("等待交易确认...", { id: "publish-progress" });
+        toast.loading("Waiting for transaction confirmation...", { id: "publish-progress" });
 
         // 显示最终成功消息
         toast.success(
-          operation === 'create' ? "文档列表 NFT 创建成功！" : "文档列表 NFT 更新成功！",
+          operation === 'create' ? "Document list NFT created successfully!" : "Document list NFT updated successfully!",
           {
             id: "publish-progress",
             description: `TokenId: ${tokenId.toString()}`,
@@ -635,49 +652,51 @@ export default function MarkdownManagerPage() {
         
       } catch (error) {
         console.error("文件发布失败:", error);
-        toast.error("文件发布失败", {
+        toast.error("File publication failed", {
           id: "publish-progress",
-          description: error instanceof Error ? error.message : "未知错误",
+          description: error instanceof Error ? error.message : "Unknown error",
           duration: 5000
         });
+      } finally {
+        setIsProcessing(false);
       }
     } else {
       // 处理已有文件的更新
       try {
         // 前置检查
         if (!isWalletConnected || !walletAddress) {
-          toast.error("请先连接钱包");
+          toast.error("Please connect your wallet first");
           return;
         }
 
         if (!publicKey) {
-          toast.error("无法获取钱包公钥，请重新连接钱包");
+          toast.error("Unable to get wallet public key, please reconnect your wallet");
           return;
         }
 
         if (!newContent.trim()) {
-          toast.error("文件内容不能为空");
+          toast.error("File content cannot be empty");
           return;
         }
 
         if (!newName.trim()) {
-          toast.error("文件名不能为空");
+          toast.error("File name cannot be empty");
           return;
         }
 
         // 显示开始处理的提示
-        toast.loading("正在处理文件更新...", { id: "update-progress" });
+        toast.loading("Processing file update…", { id: "update-progress" });
 
         // 步骤1：加密单个文件内容
         console.log("=== 步骤1-开始加密更新的文件内容 ===");
-        toast.loading("正在加密文件内容...", { id: "update-progress" });
+        toast.loading("Encrypting file content…", { id: "update-progress" });
         
         const encryptionResult = encryptText(newContent);
         console.log("加密结果:", encryptionResult.encryptedData);
 
         // 步骤2：上传单个文件到 IPFS
         console.log("=== 步骤2：开始上传更新的文件到 IPFS ===");
-        toast.loading("正在上传文件到 IPFS...", { id: "update-progress" });
+        toast.loading("Uploading file to IPFS…", { id: "update-progress" });
         const ipfsFileName = `encrypted_document_${Date.now()}.bin`;
         const ipfsResult = await uploadToIPFS(encryptionResult.encryptedData, {
           fileName: ipfsFileName,
@@ -703,7 +722,7 @@ export default function MarkdownManagerPage() {
 
         // 步骤4：创建更新的文件元数据
         console.log("=== 步骤4：创建更新的文件元数据 ===");
-        toast.loading("正在创建文件元数据...", { id: "update-progress" });
+        toast.loading("Creating file metadata…", { id: "update-progress" });
 
         const gatewayUrl = `https://gateway.pinata.cloud/ipfs/${ipfsResult.IpfsHash}`;
 
@@ -743,7 +762,7 @@ export default function MarkdownManagerPage() {
 
         // 步骤6：加密整个文档集合
         console.log("=== 步骤6：开始加密文档集合 ===");
-        toast.loading("正在加密文档集合...", { id: "update-progress" });
+        toast.loading("Encrypting document collection…", { id: "update-progress" });
 
         const collectionJSON = JSON.stringify(updatedOriginalMetadata);
         const collectionEncryptionResult = encryptText(collectionJSON);
@@ -754,7 +773,7 @@ export default function MarkdownManagerPage() {
 
         // 步骤7：上传加密的文档集合到 IPFS
         console.log("=== 步骤7：上传加密的文档集合到 IPFS ===");
-        toast.loading("正在上传文档集合到 IPFS...", { id: "update-progress" });
+        toast.loading("Uploading document collection to IPFS…", { id: "update-progress" });
 
         const collectionFileName = `document_collection_${Date.now()}.bin`;
         const collectionIpfsResult = await uploadToIPFS(collectionEncryptionResult.encryptedData, {
@@ -773,7 +792,7 @@ export default function MarkdownManagerPage() {
 
         // 步骤8：准备集合的 MetaMask 加密密钥
         console.log("=== 步骤8：MetaMask 加密集合密钥 ===");
-        toast.loading("正在加密集合密钥数据...", { id: "update-progress" });
+        toast.loading("Encrypting collection key data…", { id: "update-progress" });
 
         const collectionKeyData = {
           encryptionKey: collectionEncryptionResult.key,
@@ -791,7 +810,7 @@ export default function MarkdownManagerPage() {
 
         // 步骤9：初始化合约
         console.log("=== 步骤9：初始化合约 ===");
-        toast.loading("正在初始化合约...", { id: "update-progress" });
+        toast.loading("Initializing contract…", { id: "update-progress" });
 
         const contract = getDefaultContract();
         await contract.init();
@@ -799,7 +818,7 @@ export default function MarkdownManagerPage() {
 
         // 步骤10：检查用户 NFT 状态
         console.log("=== 步骤10：检查用户 NFT 状态 ===");
-        toast.loading("正在检查用户 NFT 状态...", { id: "update-progress" });
+        toast.loading("Checking user NFT status…", { id: "update-progress" });
 
         const tokenIds = await contract.getUserTokenIds(walletAddress);
         console.log("用户拥有的 TokenId 列表:", tokenIds.map(id => id.toString()));
@@ -814,7 +833,7 @@ export default function MarkdownManagerPage() {
         if (tokenIds.length === 0) {
           // 理论上不应该发生，因为更新文件意味着用户已经有 NFT
           console.log("警告：更新文件但用户没有 NFT，创建新的 DocumentList");
-          toast.loading("正在创建新的文档列表 NFT...", { id: "update-progress" });
+          toast.loading("Creating new document list NFT…", { id: "update-progress" });
 
           const createResult = await contract.createDocumentListWithDetails(
             collectionIpfsResult.IpfsHash, 
@@ -832,7 +851,7 @@ export default function MarkdownManagerPage() {
         } else {
           // 更新现有的 DocumentList (使用第一个)
           console.log("更新现有的 DocumentList");
-          toast.loading("正在更新文档列表 NFT...", { id: "update-progress" });
+          toast.loading("Updating document list NFT…", { id: "update-progress" });
 
           tokenId = tokenIds[0];
           const updateResult = await contract.updateDocumentListWithDetails(
@@ -849,10 +868,10 @@ export default function MarkdownManagerPage() {
           });
         }
 
-        toast.loading("等待交易确认...", { id: "update-progress" });
+        toast.loading("Waiting for transaction confirmation…", { id: "update-progress" });
 
         // 显示最终成功消息
-        toast.success("文件更新成功！", {
+        toast.success("File updated successfully!", {
           id: "update-progress",
           description: `TokenId: ${tokenId.toString()}`,
           duration: 5000
@@ -874,11 +893,13 @@ export default function MarkdownManagerPage() {
 
       } catch (error) {
         console.error("文件更新失败:", error);
-        toast.error("文件更新失败", {
+        toast.error("Failed to update file", {
           id: "update-progress",
-          description: error instanceof Error ? error.message : "未知错误",
+          description: error instanceof Error ? error.message : "Unknown error",
           duration: 5000
         });
+      } finally {
+        setIsProcessing(false);
       }
     }
   };
@@ -931,6 +952,7 @@ export default function MarkdownManagerPage() {
             onUpdateFile={handleUpdateFile}
             isNew={isEditingNewFile}
             isMobile={false}
+            isProcessing={isProcessing}
             onBack={() => {}} // 桌面端不需要返回功能
           />
         ) : (
@@ -955,6 +977,7 @@ export default function MarkdownManagerPage() {
           onUpdateFile={handleUpdateFile}
           isNew={isEditingNewFile}
           isMobile={true}
+          isProcessing={isProcessing}
           onBack={() => setSelectedFile(null)} // 移动端可以返回文件列表
         />
       ) : (
