@@ -28,8 +28,10 @@ export default function RootLayout({
           attribute="class"
           defaultTheme="system"
           enableSystem
-          disableTransitionOnChange
-          themes={['light', 'dark', 'blue', 'green', 'pink', 'purple']}
+          disableTransitionOnChange={false}
+          themes={['light', 'dark', 'system', 'blue', 'green', 'pink', 'purple']}
+          storageKey="bluedoku-theme"
+          forcedTheme={undefined}
         >
           <ConditionalLayout>{children}</ConditionalLayout>
         </ThemeProvider>

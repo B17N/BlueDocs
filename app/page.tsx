@@ -7,6 +7,7 @@ import { useState, useEffect, useRef } from "react";
 import { FileList } from "@/components/file-list";
 import { EditorPane } from "@/components/editor-pane";
 import { ConnectWalletButton } from "@/components/connect-wallet-button";
+import { SettingsButton } from "@/components/settings-button";
 // 导入图标：布局面板、编辑器、帮助圆圈
 import { LayoutPanelLeft, Edit3, HelpCircle } from "lucide-react";
 // 导入自定义钩子：检测是否为移动设备
@@ -276,6 +277,14 @@ export default function MarkdownManagerPage() {
   // 事件处理函数：连接钱包
   const handleConnectWallet = async () => {
     try {
+      // 检查MetaMask是否安装
+      if (!isMetaMaskInstalled()) {
+        toast.error("MetaMask not found", {
+          description: "Please install MetaMask wallet to continue"
+        });
+        return;
+      }
+      
       await connectWallet();
     } catch (error) {
       console.error("Failed to connect wallet:", error);
@@ -1205,15 +1214,18 @@ export default function MarkdownManagerPage() {
             BlueDoku
           </h1>
         </div>
-        <ConnectWalletButton
-          isConnected={isWalletConnected}
-          walletAddress={walletAddress}
-          onConnect={handleConnectWallet}
-          onDisconnect={handleDisconnectWallet}
-        />
+        <div className="flex items-center gap-2">
+         
+          <ConnectWalletButton
+            isConnected={isWalletConnected}
+            walletAddress={walletAddress}
+            onConnect={handleConnectWallet}
+            onDisconnect={handleDisconnectWallet}
+          /> 
+          {isWalletConnected && <SettingsButton />}
+        </div>
       </header>
 
-      {/* 主内容区：根据钱包连接状态和设备类型显示不同内容 */}
       {isWalletConnected ? (
         // 钱包已连接：根据设备类型显示相应布局
         isMobile ? (

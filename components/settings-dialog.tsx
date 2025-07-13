@@ -20,12 +20,18 @@ interface SettingsDialogProps {
 }
 
 export function SettingsDialog({ isOpen, onOpenChange }: SettingsDialogProps) {
-  const { theme, setTheme } = useTheme();
+  const { theme, setTheme, resolvedTheme } = useTheme();
   const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
     setMounted(true);
   }, []);
+
+  const handleThemeChange = (newTheme: string) => {
+    setTheme(newTheme);
+    // 主题会自动保存到 localStorage
+    console.log(`Theme changed to: ${newTheme}`);
+  };
 
   if (!mounted) {
     return null;
@@ -43,7 +49,10 @@ export function SettingsDialog({ isOpen, onOpenChange }: SettingsDialogProps) {
         <div className="space-y-6 py-4">
           <div className="space-y-3">
             <Label className="text-sm font-medium">Theme</Label>
-            <RadioGroup value={theme} onValueChange={setTheme}>
+            <p className="text-xs text-muted-foreground">
+              Your theme preference will be saved automatically
+            </p>
+            <RadioGroup value={theme} onValueChange={handleThemeChange}>
               <div className="flex items-center space-x-2">
                 <RadioGroupItem value="light" id="light" />
                 <Label htmlFor="light" className="flex items-center gap-2 cursor-pointer">
