@@ -166,6 +166,7 @@ export default function MarkdownManagerPage() {
       
       // 获取用户的Token ID列表
       const tokenIds = await contract.getUserTokenIds(address);
+      console.log("tokenIds raw output:", tokenIds, "typeof first:", typeof tokenIds[0]);
       console.log("用户Token ID列表:", tokenIds.map(id => id.toString()));
       setUserTokenIds(tokenIds);
       

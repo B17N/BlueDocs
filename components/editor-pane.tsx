@@ -1,13 +1,15 @@
 "use client"
 
 import type React from "react"
-
-import { useState, useEffect } from "react"
+import { useState, useEffect, useRef } from "react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
 import { HistoryViewer } from "@/components/history-viewer"
 import { Badge } from "@/components/ui/badge"
+import ReactMarkdown from "react-markdown"
+import remarkGfm from "remark-gfm"
+import rehypeHighlight from "rehype-highlight"
 import {
   History,
   UploadCloud,
@@ -47,6 +49,7 @@ export function EditorPane({ file, onUpdateFile, isNew, isMobile, isProcessing, 
   const [isHistoryOpen, setIsHistoryOpen] = useState(false)
   const [buttonState, setButtonState] = useState<ButtonState>("idle")
   const [isShareDialogOpen, setIsShareDialogOpen] = useState(false)
+  const textareaRef = useRef<HTMLTextAreaElement>(null)
 
   const [initialFileName, setInitialFileName] = useState(file.name)
   const [initialMarkdownContent, setInitialMarkdownContent] = useState(file.content)
@@ -82,6 +85,69 @@ export function EditorPane({ file, onUpdateFile, isNew, isMobile, isProcessing, 
     setInitialFileName(fileName)
     setInitialMarkdownContent(markdownContent)
     setIsModified(false)
+  }
+
+  // 辅助函数：获取当前选中的文本或光标位置
+  const getTextareaSelection = () => {
+    if (!textareaRef.current) return { start: 0, end: 0, selectedText: "" }
+    
+    const { selectionStart, selectionEnd, value } = textareaRef.current
+    return {
+      start: selectionStart,
+      end: selectionEnd,
+      selectedText: value.substring(selectionStart, selectionEnd)
+    }
+  }
+
+  // 辅助函数：在光标位置插入文本
+  const insertText = (prefix: string, suffix: string = "", placeholder: string = "") => {
+    if (!textareaRef.current) return
+    
+    const { start, end, selectedText } = getTextareaSelection()
+    let newText = ""
+    
+    if (selectedText) {
+      newText = prefix + selectedText + suffix
+    } else {
+      newText = prefix + placeholder + suffix
+    }
+    
+    const newContent = markdownContent.slice(0, start) + newText + markdownContent.slice(end)
+    setMarkdownContent(newContent)
+    
+    // 设置新的光标位置
+    setTimeout(() => {
+      if (textareaRef.current) {
+        if (selectedText) {
+          textareaRef.current.setSelectionRange(start, start + newText.length)
+        } else {
+          textareaRef.current.setSelectionRange(start + prefix.length, start + prefix.length + placeholder.length)
+        }
+        textareaRef.current.focus()
+      }
+    }, 0)
+  }
+
+  // 工具栏按钮处理函数
+  const handleBold = () => insertText("**", "**", "bold text")
+  const handleItalic = () => insertText("*", "*", "italic text")
+  const handleStrikethrough = () => insertText("~~", "~~", "strikethrough text")
+  const handleHeading1 = () => insertText("# ", "", "Heading 1")
+  const handleHeading2 = () => insertText("## ", "", "Heading 2")
+  const handleList = () => insertText("- ", "", "List item")
+  const handleOrderedList = () => insertText("1. ", "", "Numbered item")
+  const handleQuote = () => insertText("> ", "", "Quote")
+  const handleCode = () => insertText("`", "`", "code")
+  const handleLink = () => insertText("[", "](url)", "link text")
+  const handleImage = () => insertText("![", "](image-url)", "alt text")
+  const handleTable = () => {
+    const tableText = `
+| Header 1 | Header 2 | Header 3 |
+|----------|----------|----------|
+| Row 1    | Data     | Data     |
+| Row 2    | Data     | Data     |
+`
+    insertText(tableText, "", "")
   }
 
   const getButtonContent = () => {
@@ -203,44 +269,44 @@ export function EditorPane({ file, onUpdateFile, isNew, isMobile, isProcessing, 
         <div className="flex-1 flex flex-col border rounded-lg overflow-hidden">
           {/* Toolbar */}
           <div className="flex items-center gap-1 p-2 border-b bg-muted/30 flex-wrap">
-            <Button variant="ghost" size="sm" className="h-8 w-8 p-0">
+            <Button variant="ghost" size="sm" className="h-8 w-8 p-0" onClick={handleBold} title="Bold">
               <Bold className="h-4 w-4" />
             </Button>
-            <Button variant="ghost" size="sm" className="h-8 w-8 p-0">
+            <Button variant="ghost" size="sm" className="h-8 w-8 p-0" onClick={handleItalic} title="Italic">
               <Italic className="h-4 w-4" />
             </Button>
-            <Button variant="ghost" size="sm" className="h-8 w-8 p-0">
+            <Button variant="ghost" size="sm" className="h-8 w-8 p-0" onClick={handleStrikethrough} title="Strikethrough">
               <Strikethrough className="h-4 w-4" />
             </Button>
             <div className="w-px h-6 bg-border mx-1" />
-            <Button variant="ghost" size="sm" className="h-8 w-8 p-0">
+            <Button variant="ghost" size="sm" className="h-8 w-8 p-0" onClick={handleHeading1} title="Heading 1">
               <Heading1 className="h-4 w-4" />
             </Button>
-            <Button variant="ghost" size="sm" className="h-8 w-8 p-0">
+            <Button variant="ghost" size="sm" className="h-8 w-8 p-0" onClick={handleHeading2} title="Heading 2">
               <Heading2 className="h-4 w-4" />
             </Button>
             <div className="w-px h-6 bg-border mx-1" />
-            <Button variant="ghost" size="sm" className="h-8 w-8 p-0">
+            <Button variant="ghost" size="sm" className="h-8 w-8 p-0" onClick={handleList} title="Bullet List">
               <List className="h-4 w-4" />
             </Button>
-            <Button variant="ghost" size="sm" className="h-8 w-8 p-0">
+            <Button variant="ghost" size="sm" className="h-8 w-8 p-0" onClick={handleOrderedList} title="Numbered List">
               <ListOrdered className="h-4 w-4" />
             </Button>
             <div className="w-px h-6 bg-border mx-1" />
-            <Button variant="ghost" size="sm" className="h-8 w-8 p-0">
+            <Button variant="ghost" size="sm" className="h-8 w-8 p-0" onClick={handleQuote} title="Quote">
               <Quote className="h-4 w-4" />
             </Button>
-            <Button variant="ghost" size="sm" className="h-8 w-8 p-0">
+            <Button variant="ghost" size="sm" className="h-8 w-8 p-0" onClick={handleCode} title="Inline Code">
               <Code className="h-4 w-4" />
             </Button>
-            <Button variant="ghost" size="sm" className="h-8 w-8 p-0">
+            <Button variant="ghost" size="sm" className="h-8 w-8 p-0" onClick={handleLink} title="Link">
               <Link className="h-4 w-4" />
             </Button>
-            <Button variant="ghost" size="sm" className="h-8 w-8 p-0">
+            <Button variant="ghost" size="sm" className="h-8 w-8 p-0" onClick={handleImage} title="Image">
               <ImageIcon className="h-4 w-4" />
             </Button>
             <div className="w-px h-6 bg-border mx-1" />
-            <Button variant="ghost" size="sm" className="h-8 w-8 p-0">
+            <Button variant="ghost" size="sm" className="h-8 w-8 p-0" onClick={handleTable} title="Table">
               <Table className="h-4 w-4" />
             </Button>
           </div>
@@ -253,6 +319,7 @@ export function EditorPane({ file, onUpdateFile, isNew, isMobile, isProcessing, 
                 <span className="text-xs font-medium text-muted-foreground">Markdown</span>
               </div>
               <Textarea
+                ref={textareaRef}
                 id="markdown-editor"
                 value={markdownContent}
                 onChange={handleMarkdownChange}
@@ -271,7 +338,58 @@ export function EditorPane({ file, onUpdateFile, isNew, isMobile, isProcessing, 
                     <span className="text-xs font-medium text-muted-foreground">Preview</span>
                   </div>
                   <div className="flex-1 p-4 overflow-y-auto prose prose-sm dark:prose-invert max-w-none">
-                    <pre className="whitespace-pre-wrap break-words text-sm font-sans">{markdownContent}</pre>
+                    <ReactMarkdown
+                      remarkPlugins={[remarkGfm]}
+                      rehypePlugins={[rehypeHighlight]}
+                      components={{
+                        h1: ({ children }) => <h1 className="text-2xl font-bold mb-4">{children}</h1>,
+                        h2: ({ children }) => <h2 className="text-xl font-semibold mb-3">{children}</h2>,
+                        h3: ({ children }) => <h3 className="text-lg font-medium mb-2">{children}</h3>,
+                        p: ({ children }) => <p className="mb-4 leading-relaxed">{children}</p>,
+                        ul: ({ children }) => <ul className="list-disc pl-6 mb-4 space-y-1">{children}</ul>,
+                        ol: ({ children }) => <ol className="list-decimal pl-6 mb-4 space-y-1">{children}</ol>,
+                        li: ({ children }) => <li className="leading-relaxed">{children}</li>,
+                        blockquote: ({ children }) => (
+                          <blockquote className="border-l-4 border-gray-300 pl-4 italic mb-4 text-gray-600 dark:text-gray-400">
+                            {children}
+                          </blockquote>
+                        ),
+                        code: ({ children, className }) => {
+                          const isInline = !className
+                          if (isInline) {
+                            return <code className="bg-gray-100 dark:bg-gray-800 px-1 py-0.5 rounded text-sm font-mono">{children}</code>
+                          }
+                          return <code className={className}>{children}</code>
+                        },
+                        pre: ({ children }) => (
+                          <pre className="bg-gray-100 dark:bg-gray-800 p-4 rounded-lg overflow-x-auto mb-4 text-sm">
+                            {children}
+                          </pre>
+                        ),
+                        a: ({ children, href }) => (
+                          <a href={href} className="text-blue-600 dark:text-blue-400 hover:underline" target="_blank" rel="noopener noreferrer">
+                            {children}
+                          </a>
+                        ),
+                        table: ({ children }) => (
+                          <table className="w-full border-collapse border border-gray-300 dark:border-gray-600 mb-4">
+                            {children}
+                          </table>
+                        ),
+                        th: ({ children }) => (
+                          <th className="border border-gray-300 dark:border-gray-600 px-4 py-2 bg-gray-100 dark:bg-gray-800 text-left">
+                            {children}
+                          </th>
+                        ),
+                        td: ({ children }) => (
+                          <td className="border border-gray-300 dark:border-gray-600 px-4 py-2">
+                            {children}
+                          </td>
+                        ),
+                      }}
+                    >
+                      {markdownContent}
+                    </ReactMarkdown>
                   </div>
                 </div>
               </>
