@@ -37,8 +37,43 @@ export function ConnectWalletButton({
     );
   }
 
+  const handleConnect = async () => {
+    // 移动端增加额外的日志和延迟处理
+    const userAgent = navigator.userAgent || navigator.vendor || (window as any).opera;
+    const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini|MetaMaskMobile/i.test(userAgent);
+    
+    console.log("[CONNECT_BUTTON] Connect clicked", {
+      isMobile,
+      userAgent,
+      hasEthereum: !!window.ethereum,
+      timestamp: new Date().toISOString()
+    });
+
+    if (isMobile && !window.ethereum) {
+      // 移动端可能需要等待 ethereum 对象注入
+      console.log("[CONNECT_BUTTON] Mobile detected, waiting for ethereum...");
+      
+      let attempts = 0;
+      const maxAttempts = 30; // 3秒
+      const checkInterval = 100;
+      
+      while (attempts < maxAttempts && !window.ethereum) {
+        await new Promise(resolve => setTimeout(resolve, checkInterval));
+        attempts++;
+      }
+      
+      if (window.ethereum) {
+        console.log(`[CONNECT_BUTTON] Ethereum found after ${attempts * checkInterval}ms`);
+      } else {
+        console.log("[CONNECT_BUTTON] Ethereum not found after waiting");
+      }
+    }
+
+    onConnect();
+  };
+
   return (
-    <Button onClick={onConnect}>
+    <Button onClick={handleConnect}>
       <LogIn className="h-4 w-4 mr-2" />
       Connect Wallet
     </Button>

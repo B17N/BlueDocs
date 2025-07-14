@@ -12,6 +12,7 @@ import {
 declare global {
   interface Window {
     ethereum?: any;
+    web3?: any;
   }
 }
 
@@ -57,9 +58,58 @@ export const WalletProvider = ({ children }: { children: ReactNode }) => {
 
   // 检查 MetaMask 是否已安装
   const isMetaMaskInstalled = (): boolean => {
-    return (
-      typeof window !== "undefined" && typeof window.ethereum !== "undefined"
-    );
+    // 移动端 MetaMask 浏览器中，ethereum 对象可能需要更多时间注入
+    if (typeof window === "undefined") return false;
+    
+    // 检查标准的 ethereum 对象
+    if (typeof window.ethereum !== "undefined") {
+      return true;
+    }
+    
+    // 移动端 MetaMask 浏览器的特殊检测
+    if (typeof window.web3 !== "undefined") {
+      return true;
+    }
+    
+    // 检查是否在 MetaMask 移动端浏览器中
+    const userAgent = navigator.userAgent || navigator.vendor || (window as any).opera;
+    const isMetaMaskMobile = /MetaMaskMobile/i.test(userAgent);
+    
+    if (isMetaMaskMobile) {
+      console.log("[WALLET_PROVIDER] Detected MetaMask mobile browser");
+      return true;
+    }
+    
+    return false;
+  };
+
+  // 等待 ethereum 对象注入的函数（移动端可能需要更多时间）
+  const waitForEthereum = (): Promise<any> => {
+    return new Promise((resolve, reject) => {
+      if (window.ethereum) {
+        resolve(window.ethereum);
+        return;
+      }
+
+      let attempts = 0;
+      const maxAttempts = 20; // 最多等待 2 秒
+      const checkInterval = 100; // 每 100ms 检查一次
+
+      const checkForEthereum = () => {
+        attempts++;
+        
+        if (window.ethereum) {
+          console.log(`[WALLET_PROVIDER] Ethereum object found after ${attempts * checkInterval}ms`);
+          resolve(window.ethereum);
+        } else if (attempts >= maxAttempts) {
+          reject(new Error("Ethereum object not found after waiting"));
+        } else {
+          setTimeout(checkForEthereum, checkInterval);
+        }
+      };
+
+      setTimeout(checkForEthereum, checkInterval);
+    });
   };
 
   // 获取钱包加密公钥（用于加密消息等 Web3 场景）
@@ -78,8 +128,11 @@ export const WalletProvider = ({ children }: { children: ReactNode }) => {
     });
 
     try {
+      // 等待并获取 ethereum 对象
+      const ethereum = await waitForEthereum();
+      
       // 通过以太坊钱包 API 请求加密公钥
-      const encryptionPublicKey = await window.ethereum.request({
+      const encryptionPublicKey = await ethereum.request({
         method: "eth_getEncryptionPublicKey",
         params: [address],
       });
@@ -114,6 +167,7 @@ export const WalletProvider = ({ children }: { children: ReactNode }) => {
     console.log("[CONNECT_WALLET_START]", {
       globalHasRequestedPublicKey,
       currentState: walletState,
+      userAgent: navigator.userAgent,
       timestamp: new Date().toISOString(),
     });
 
@@ -132,8 +186,14 @@ export const WalletProvider = ({ children }: { children: ReactNode }) => {
     setWalletState((prev) => ({ ...prev, isLoading: true, error: "" }));
 
     try {
+      // 等待 ethereum 对象（移动端可能需要更多时间）
+      console.log("[CONNECT_WALLET] Waiting for ethereum object...");
+      const ethereum = await waitForEthereum();
+      
+      console.log("[CONNECT_WALLET] Ethereum object ready, requesting accounts...");
+      
       // 请求账户授权
-      const accounts = await window.ethereum.request({
+      const accounts = await ethereum.request({
         method: "eth_requestAccounts",
       });
 
@@ -173,7 +233,7 @@ export const WalletProvider = ({ children }: { children: ReactNode }) => {
       setWalletState((prev) => ({
         ...prev,
         isLoading: false,
-        error: "Failed to connect wallet",
+        error: err instanceof Error ? err.message : "Failed to connect wallet",
       }));
     }
   };
@@ -202,23 +262,27 @@ export const WalletProvider = ({ children }: { children: ReactNode }) => {
   // 组件挂载时自动检测钱包连接状态，只执行一次
 
   useEffect(() => {
-    return;
-    // 日志：检测钱包连接
-    console.log("[WALLET_PROVIDER_EFFECT] Checking wallet connection", {
-      globalHasRequestedPublicKey,
-      currentWalletState: {
-        isConnected: walletState.isConnected,
-        hasAddress: !!walletState.address,
-        hasPublicKey: !!walletState.publicKey,
-      },
-      timestamp: new Date().toISOString(),
-    });
+    // 移动端需要延迟检测，等待 ethereum 对象注入
+    const checkWalletConnection = async () => {
+      // 日志：检测钱包连接
+      console.log("[WALLET_PROVIDER_EFFECT] Checking wallet connection", {
+        globalHasRequestedPublicKey,
+        currentWalletState: {
+          isConnected: walletState.isConnected,
+          hasAddress: !!walletState.address,
+          hasPublicKey: !!walletState.publicKey,
+        },
+        timestamp: new Date().toISOString(),
+      });
 
-    if (isMetaMaskInstalled()) {
-      // 查询当前已连接账户
-      window.ethereum
-        .request({ method: "eth_accounts" })
-        .then((accounts: string[]) => {
+      if (isMetaMaskInstalled()) {
+        try {
+          // 等待 ethereum 对象（移动端可能需要时间）
+          const ethereum = await waitForEthereum();
+          
+          // 查询当前已连接账户
+          const accounts = await ethereum.request({ method: "eth_accounts" });
+          
           // 日志：账户信息
           console.log("[WALLET_PROVIDER_EFFECT] eth_accounts response", {
             accountsCount: accounts.length,
@@ -243,32 +307,31 @@ export const WalletProvider = ({ children }: { children: ReactNode }) => {
                 }
               );
 
-              getEncryptionPublicKey(address, "providerEffect-firstTime")
-                .then((publicKey) => {
-                  setWalletState({
-                    isConnected: true,
-                    address,
-                    publicKey,
-                    isLoading: false,
-                    error: "",
-                  });
-                })
-                .catch((err) => {
-                  // 用户拒绝公钥授权，仍然设置为已连接但无公钥
-                  console.warn(
-                    "[WALLET_PROVIDER_EFFECT] User denied public key access:",
-                    err
-                  );
-                  globalHasRequestedPublicKey = true;
-                  setWalletState({
-                    isConnected: true,
-                    address,
-                    publicKey: "",
-                    isLoading: false,
-                    error:
-                      "Public key access denied. Some features may not work.",
-                  });
+              try {
+                const publicKey = await getEncryptionPublicKey(address, "providerEffect-firstTime");
+                setWalletState({
+                  isConnected: true,
+                  address,
+                  publicKey,
+                  isLoading: false,
+                  error: "",
                 });
+              } catch (err) {
+                // 用户拒绝公钥授权，仍然设置为已连接但无公钥
+                console.warn(
+                  "[WALLET_PROVIDER_EFFECT] User denied public key access:",
+                  err
+                );
+                globalHasRequestedPublicKey = true;
+                setWalletState({
+                  isConnected: true,
+                  address,
+                  publicKey: "",
+                  isLoading: false,
+                  error:
+                    "Public key access denied. Some features may not work.",
+                });
+              }
             } else {
               // 已经请求过公钥，直接设置连接状态
               console.log(
@@ -294,15 +357,22 @@ export const WalletProvider = ({ children }: { children: ReactNode }) => {
               timestamp: new Date().toISOString(),
             });
           }
-        })
-        .catch((err: any) => {
+        } catch (err) {
           // 查询账户出错
           console.error("[WALLET_PROVIDER_EFFECT] eth_accounts error:", err);
-        });
-    } else {
-      // 未安装 MetaMask
-      console.log("[WALLET_PROVIDER_EFFECT] MetaMask not installed");
-    }
+        }
+      } else {
+        // 未安装 MetaMask
+        console.log("[WALLET_PROVIDER_EFFECT] MetaMask not installed");
+      }
+    };
+
+    // 移动端需要延迟执行，给 ethereum 对象注入更多时间
+    const timer = setTimeout(() => {
+      checkWalletConnection();
+    }, 100);
+
+    return () => clearTimeout(timer);
   }, []); // 依赖数组为空，只在Provider挂载时执行一次
 
   // 构造 context 值，暴露所有状态和操作方法

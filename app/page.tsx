@@ -277,17 +277,36 @@ export default function MarkdownManagerPage() {
   // 事件处理函数：连接钱包
   const handleConnectWallet = async () => {
     try {
+      // 移动端调试信息
+      const userAgent = navigator.userAgent || navigator.vendor || (window as any).opera;
+      const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini|MetaMaskMobile/i.test(userAgent);
+      
+      console.log("[MAIN_PAGE] Connect wallet attempt", {
+        isMobile,
+        userAgent,
+        hasEthereum: !!window.ethereum,
+        hasWeb3: !!(window as any).web3,
+        timestamp: new Date().toISOString()
+      });
+
       // 检查MetaMask是否安装
       if (!isMetaMaskInstalled()) {
+        console.log("[MAIN_PAGE] MetaMask check failed");
         toast.error("MetaMask not found", {
-          description: "Please install MetaMask wallet to continue"
+          description: isMobile 
+            ? "Please ensure you're using the MetaMask mobile browser and the app is properly installed" 
+            : "Please install MetaMask wallet to continue"
         });
         return;
       }
       
+      console.log("[MAIN_PAGE] MetaMask detected, attempting connection...");
       await connectWallet();
     } catch (error) {
       console.error("Failed to connect wallet:", error);
+      toast.error("Wallet connection failed", {
+        description: error instanceof Error ? error.message : "Unknown error occurred"
+      });
     }
   };
 
@@ -1240,6 +1259,18 @@ export default function MarkdownManagerPage() {
             Please connect your wallet to manage your files.
           </p>
           <HelpCircle className="h-12 w-12 text-muted-foreground" />
+          
+          {/* 移动端调试信息 */}
+          {isMobile && (
+            <div className="mt-4 p-3 bg-muted rounded-lg text-xs space-y-1 max-w-md">
+              <p className="font-medium">Mobile Debug Info:</p>
+              <p>MetaMask Installed: {isMetaMaskInstalled() ? "✓" : "✗"}</p>
+              <p>Ethereum Object: {typeof window !== "undefined" && window.ethereum ? "✓" : "✗"}</p>
+              <p>User Agent: {typeof navigator !== "undefined" ? navigator.userAgent.slice(0, 50) + "..." : "N/A"}</p>
+              {walletError && <p className="text-destructive">Error: {walletError}</p>}
+            </div>
+          )}
+          
           <div className="mt-8 max-w-md text-sm text-muted-foreground space-y-2 text-center">
             <p>My mind is mine — not yours (AI, Zuck, Elon, Sam… etc).</p>
             <p>What I share with my friends stays between us.</p>
