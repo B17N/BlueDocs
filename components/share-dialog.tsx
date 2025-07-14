@@ -14,65 +14,61 @@ import {
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { Loader2, Share2, Copy, CheckCircle2 } from "lucide-react"
+import { Loader2, Share2, Copy, CheckCircle2, AlertCircle } from "lucide-react"
 
 interface ShareDialogProps {
   isOpen: boolean
   onOpenChange: (isOpen: boolean) => void
   fileName: string
-  fileId: string // Added fileId
-  onShare: (address: string) => Promise<void>
+  fileId: string
+  fileContent: string
+  onShare: () => Promise<{ ipfsHash: string; urlKey: string }>
 }
 
-export function ShareDialog({ isOpen, onOpenChange, fileName, fileId, onShare }: ShareDialogProps) {
-  const [address, setAddress] = useState("")
+export function ShareDialog({ 
+  isOpen, 
+  onOpenChange, 
+  fileName, 
+  fileId, 
+  fileContent,
+  onShare 
+}: ShareDialogProps) {
   const [isSharing, setIsSharing] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [generatedLink, setGeneratedLink] = useState<string | null>(null)
   const [linkCopied, setLinkCopied] = useState(false)
 
   useEffect(() => {
-    // Reset state when dialog visibility changes or fileId changes
+    // Reset state when dialog visibility changes
     if (!isOpen) {
       setTimeout(() => {
         // Delay reset for animations
-        setAddress("")
         setError(null)
         setIsSharing(false)
         setGeneratedLink(null)
         setLinkCopied(false)
       }, 300)
     } else {
-      // If dialog opens, ensure previous link is cleared if file changes
+      // If dialog opens, ensure previous link is cleared
       setGeneratedLink(null)
       setLinkCopied(false)
     }
   }, [isOpen, fileId])
 
-  const handleAddressChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    setAddress(e.target.value)
-    if (error) setError(null)
-    if (generatedLink) setGeneratedLink(null) // Clear link if address changes
-  }
-
-  const handleSubmit = async () => {
-    if (!/^0x[a-fA-F0-9]{40}$/.test(address)) {
-      setError("Please enter a valid Ethereum address.")
-      return
-    }
+  const handleGenerateLink = async () => {
     setError(null)
     setIsSharing(true)
     setGeneratedLink(null)
     setLinkCopied(false)
 
     try {
-      await onShare(address)
-      // Generate shareable link (mocked)
-      const shareLink = `${window.location.origin}/view/${fileId}`
+      const { ipfsHash, urlKey } = await onShare()
+      
+      // Generate shareable link with key in fragment
+      const shareLink = `${window.location.origin}/view/${ipfsHash}#key=${urlKey}`
       setGeneratedLink(shareLink)
-      // Don't close dialog automatically, let user copy link
     } catch (e) {
-      setError("Failed to grant access. Please try again.")
+      setError(e instanceof Error ? e.message : "Failed to generate share link. Please try again.")
     } finally {
       setIsSharing(false)
     }
@@ -92,51 +88,43 @@ export function ShareDialog({ isOpen, onOpenChange, fileName, fileId, onShare }:
 
   return (
     <Dialog open={isOpen} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-[480px]">
+      <DialogContent className="sm:max-w-[520px]">
         <DialogHeader>
           <DialogTitle>Share "{fileName}"</DialogTitle>
           <DialogDescription>
-            Enter the wallet address to grant read access. This will (mock) encrypt the file's key for them and record
-            it on-chain.
+            Generate a shareable link for this document. Anyone with the link will be able to view the document.
           </DialogDescription>
         </DialogHeader>
 
         {!generatedLink ? (
           <>
-            <div className="grid gap-4 py-4">
-              <div className="grid grid-cols-4 items-center gap-4">
-                <Label htmlFor="address" className="text-right">
-                  Address
-                </Label>
-                <Input
-                  id="address"
-                  value={address}
-                  onChange={handleAddressChange}
-                  placeholder="0x..."
-                  className="col-span-3"
-                  aria-describedby="address-error"
-                />
+            <div className="py-4">
+              <div className="flex items-center p-3 bg-blue-50 dark:bg-blue-900/30 border border-blue-200 dark:border-blue-700 rounded-md">
+                <AlertCircle className="h-5 w-5 text-blue-600 dark:text-blue-400 mr-3 flex-shrink-0" />
+                <p className="text-sm text-blue-700 dark:text-blue-300">
+                  The document will be encrypted with a unique key. The decryption key will be embedded in the shareable link.
+                </p>
               </div>
               {error && (
-                <p id="address-error" className="col-span-4 text-red-500 text-sm text-center -mt-2">
-                  {error}
-                </p>
+                <div className="mt-3 p-3 bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-700 rounded-md">
+                  <p className="text-sm text-red-700 dark:text-red-300">{error}</p>
+                </div>
               )}
             </div>
             <DialogFooter>
               <Button type="button" variant="outline" onClick={handleDialogClose}>
                 Cancel
               </Button>
-              <Button type="submit" onClick={handleSubmit} disabled={isSharing || !address}>
+              <Button type="submit" onClick={handleGenerateLink} disabled={isSharing}>
                 {isSharing ? (
                   <>
                     <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                    Granting Access...
+                    Generating Link...
                   </>
                 ) : (
                   <>
                     <Share2 className="mr-2 h-4 w-4" />
-                    Grant Access
+                    Generate Share Link
                   </>
                 )}
               </Button>
@@ -147,17 +135,26 @@ export function ShareDialog({ isOpen, onOpenChange, fileName, fileId, onShare }:
             <div className="flex items-center p-3 bg-green-50 dark:bg-green-900/30 border border-green-200 dark:border-green-700 rounded-md">
               <CheckCircle2 className="h-5 w-5 text-green-600 dark:text-green-400 mr-3 flex-shrink-0" />
               <p className="text-sm text-green-700 dark:text-green-300">
-                Access granted to <span className="font-semibold">{address}</span>.
+                Share link generated successfully!
               </p>
             </div>
             <div>
               <Label htmlFor="share-link">Shareable Link:</Label>
               <div className="flex items-center gap-2 mt-1">
-                <Input id="share-link" type="text" value={generatedLink} readOnly className="bg-muted flex-grow" />
+                <Input 
+                  id="share-link" 
+                  type="text" 
+                  value={generatedLink} 
+                  readOnly 
+                  className="bg-muted flex-grow font-mono text-xs" 
+                />
                 <Button variant="outline" size="icon" onClick={handleCopyLink} title="Copy link">
                   {linkCopied ? <CheckCircle2 className="h-4 w-4 text-green-500" /> : <Copy className="h-4 w-4" />}
                 </Button>
               </div>
+              <p className="text-xs text-muted-foreground mt-2">
+                This link contains the decryption key. Share it only with trusted recipients.
+              </p>
             </div>
             <DialogFooter>
               <Button type="button" onClick={handleDialogClose}>

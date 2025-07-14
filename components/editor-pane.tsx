@@ -31,6 +31,9 @@ import {
 } from "lucide-react"
 import type { FileData } from "@/app/page"
 import { ShareDialog } from "@/components/share-dialog"
+import { createSharePayload } from "@/lib/share-encryption"
+import { uploadToIPFS } from "@/lib/ipfs"
+import { toast } from "sonner"
 
 interface EditorPaneProps {
   file: FileData
@@ -192,10 +195,36 @@ export function EditorPane({ file, onUpdateFile, isNew, isMobile, isProcessing, 
     }
   }
 
-  const handleShare = async (address: string) => {
-    console.log(`Sharing file ${file.id} with address ${address}`)
-    await new Promise((resolve) => setTimeout(resolve, 1500))
-    alert(`Access granted to ${address} (mocked).`)
+  const handleShare = async () => {
+    try {
+      // Create encrypted share payload
+      const { payload, urlKey } = await createSharePayload(
+        markdownContent,
+        fileName,
+        'text/markdown'
+      );
+      
+      // Upload to IPFS
+      const ipfsResult = await uploadToIPFS(
+        new TextEncoder().encode(JSON.stringify(payload)),
+        {
+          fileName: `shared_document_${Date.now()}.json`,
+          fileType: 'application/json',
+          metadata: {
+            type: 'shared-doc',
+            version: '1.0'
+          }
+        }
+      );
+      
+      return {
+        ipfsHash: ipfsResult.IpfsHash,
+        urlKey
+      };
+    } catch (error) {
+      console.error('Share error:', error);
+      throw error;
+    }
   }
 
   return (
@@ -250,9 +279,9 @@ export function EditorPane({ file, onUpdateFile, isNew, isMobile, isProcessing, 
             <Button
               variant="outline"
               onClick={() => setIsShareDialogOpen(true)}
-              disabled={isNew}
-              title={isNew ? "Publish the file first to enable sharing" : "Share file"}
-              className="flex-1 hidden"
+              disabled={isNew || !markdownContent.trim()}
+              title={isNew ? "Publish the file first to enable sharing" : !markdownContent.trim() ? "Cannot share empty file" : "Share file"}
+              className="flex-1"
             >
               <Share2 className="h-4 w-4 mr-2" />
               Share
@@ -409,6 +438,7 @@ export function EditorPane({ file, onUpdateFile, isNew, isMobile, isProcessing, 
         onOpenChange={setIsShareDialogOpen}
         fileName={fileName}
         fileId={file.id}
+        fileContent={markdownContent}
         onShare={handleShare}
       />
     </div>

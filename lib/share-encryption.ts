@@ -1,201 +1,222 @@
-/**
- * Share feature encryption utilities using Web Crypto API
- * AES-256-GCM encryption for shared documents
- */
+import { webcrypto } from 'crypto';
+
+// Use Node.js crypto.webcrypto for AES-GCM operations
+const crypto = typeof window !== 'undefined' ? window.crypto : webcrypto as Crypto;
+
+export interface SharePayload {
+  version: string;
+  type: string;
+  doc: string;  // Base64-encoded encrypted content
+  title: string; // Base64-encoded encrypted title
+  key: string;  // Hex-encoded encrypted K1
+  iv: string;   // Hex-encoded IV
+  meta: {
+    fileType: string;
+    createdAt: string;
+  };
+}
 
 /**
- * Encrypt partial key using XOR with secret key
- * This is a simple encryption for the partial key stored in NFT
+ * Convert array buffer to hex string
  */
-export const encryptPartialKey = (partialKey: string, secretKey: string): string => {
-  // Convert hex strings to bytes
-  const partialKeyBytes = hexToBytes(partialKey);
-  const secretKeyBytes = hexToBytes(secretKey);
-  
-  // Repeat secret key to match partial key length
-  const repeatedSecret = new Uint8Array(partialKeyBytes.length);
-  for (let i = 0; i < partialKeyBytes.length; i++) {
-    repeatedSecret[i] = secretKeyBytes[i % secretKeyBytes.length];
-  }
-  
-  // XOR encryption
-  const encrypted = new Uint8Array(partialKeyBytes.length);
-  for (let i = 0; i < partialKeyBytes.length; i++) {
-    encrypted[i] = partialKeyBytes[i] ^ repeatedSecret[i];
-  }
-  
-  return bytesToHex(encrypted);
-};
+function arrayBufferToHex(buffer: ArrayBuffer): string {
+  return Array.from(new Uint8Array(buffer))
+    .map(b => b.toString(16).padStart(2, '0'))
+    .join('');
+}
 
 /**
- * Decrypt partial key using XOR with secret key
+ * Convert hex string to array buffer
  */
-export const decryptPartialKey = (encryptedPartialKey: string, secretKey: string): string => {
-  // XOR is its own inverse, so we can use the same function
-  return encryptPartialKey(encryptedPartialKey, secretKey);
-};
-
-/**
- * Convert hex string to Uint8Array
- */
-const hexToBytes = (hex: string): Uint8Array => {
+function hexToArrayBuffer(hex: string): ArrayBuffer {
   const bytes = new Uint8Array(hex.length / 2);
   for (let i = 0; i < hex.length; i += 2) {
     bytes[i / 2] = parseInt(hex.substr(i, 2), 16);
   }
-  return bytes;
-};
+  return bytes.buffer;
+}
 
 /**
- * Convert Uint8Array to hex string
+ * Convert array buffer to base64
  */
-const bytesToHex = (bytes: Uint8Array): string => {
-  return Array.from(bytes)
-    .map(b => b.toString(16).padStart(2, '0'))
-    .join('');
-};
+function arrayBufferToBase64(buffer: ArrayBuffer): string {
+  const bytes = new Uint8Array(buffer);
+  let binary = '';
+  for (let i = 0; i < bytes.byteLength; i++) {
+    binary += String.fromCharCode(bytes[i]);
+  }
+  return btoa(binary);
+}
 
 /**
- * Generate a random AES-256 key (32 bytes)
+ * Convert base64 to array buffer
  */
-export const generateAESKey = async (): Promise<CryptoKey> => {
-  return await crypto.subtle.generateKey(
+function base64ToArrayBuffer(base64: string): ArrayBuffer {
+  const binary = atob(base64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) {
+    bytes[i] = binary.charCodeAt(i);
+  }
+  return bytes.buffer;
+}
+
+/**
+ * Encrypt data with AES-256-GCM
+ */
+async function encryptAESGCM(
+  data: ArrayBuffer,
+  key: CryptoKey,
+  iv: ArrayBuffer
+): Promise<ArrayBuffer> {
+  return await crypto.subtle.encrypt(
     {
       name: 'AES-GCM',
-      length: 256
+      iv: iv
     },
-    true, // extractable
-    ['encrypt', 'decrypt']
+    key,
+    data
   );
-};
+}
 
 /**
- * Export AES key to hex string
+ * Decrypt data with AES-256-GCM
  */
-export const exportKeyToHex = async (key: CryptoKey): Promise<string> => {
-  const exported = await crypto.subtle.exportKey('raw', key);
-  return bytesToHex(new Uint8Array(exported));
-};
-
-/**
- * Import AES key from hex string
- */
-export const importKeyFromHex = async (keyHex: string): Promise<CryptoKey> => {
-  const keyBytes = hexToBytes(keyHex);
-  return await crypto.subtle.importKey(
-    'raw',
-    keyBytes,
+async function decryptAESGCM(
+  encryptedData: ArrayBuffer,
+  key: CryptoKey,
+  iv: ArrayBuffer
+): Promise<ArrayBuffer> {
+  return await crypto.subtle.decrypt(
     {
       name: 'AES-GCM',
-      length: 256
+      iv: iv
     },
-    false, // not extractable for security
-    ['encrypt', 'decrypt']
+    key,
+    encryptedData
   );
-};
+}
 
 /**
- * Encrypt data using AES-256-GCM
- * Returns encrypted data and IV (12 bytes for GCM)
+ * Create share payload for a document
  */
-export const encryptWithAES = async (
-  data: string,
-  key: CryptoKey
-): Promise<{ encrypted: Uint8Array; iv: Uint8Array }> => {
-  // Generate random IV (12 bytes = 96 bits for GCM)
+export async function createSharePayload(
+  content: string,
+  title: string,
+  fileType: string = 'text/markdown'
+): Promise<{ payload: SharePayload; urlKey: string }> {
+  // Step 1: Generate 256-bit AES key (32 bytes)
+  const fullKey = crypto.getRandomValues(new Uint8Array(32));
+  
+  // Step 2: Split key into K1 (28 bytes) and K2 (4 bytes)
+  const k1 = fullKey.slice(0, 28);
+  const k2 = fullKey.slice(28, 32);
+  
+  // Step 3: Generate random IV (12 bytes for AES-GCM)
   const iv = crypto.getRandomValues(new Uint8Array(12));
   
-  // Convert string to Uint8Array
+  // Step 4: Import full key for encryption
+  const cryptoKey = await crypto.subtle.importKey(
+    'raw',
+    fullKey,
+    { name: 'AES-GCM', length: 256 },
+    false,
+    ['encrypt']
+  );
+  
+  // Step 5: Encrypt document content and title
   const encoder = new TextEncoder();
-  const dataBytes = encoder.encode(data);
-  
-  // Encrypt
-  const encrypted = await crypto.subtle.encrypt(
-    {
-      name: 'AES-GCM',
-      iv: iv
-    },
-    key,
-    dataBytes
+  const encryptedContent = await encryptAESGCM(
+    encoder.encode(content).buffer as ArrayBuffer,
+    cryptoKey,
+    iv.buffer as ArrayBuffer
   );
   
-  return {
-    encrypted: new Uint8Array(encrypted),
-    iv: iv
-  };
-};
-
-/**
- * Decrypt data using AES-256-GCM
- */
-export const decryptWithAES = async (
-  encrypted: Uint8Array,
-  key: CryptoKey,
-  iv: Uint8Array
-): Promise<string> => {
-  const decrypted = await crypto.subtle.decrypt(
-    {
-      name: 'AES-GCM',
-      iv: iv
-    },
-    key,
-    encrypted
+  const encryptedTitle = await encryptAESGCM(
+    encoder.encode(title).buffer as ArrayBuffer,
+    cryptoKey,
+    iv.buffer as ArrayBuffer
   );
   
-  const decoder = new TextDecoder();
-  return decoder.decode(decrypted);
-};
-
-/**
- * Split a 256-bit key (64 hex chars) into front and secret parts
- */
-export const splitKey = (fullKeyHex: string): { front: string; secret: string } => {
-  if (fullKeyHex.length !== 64) {
-    throw new Error('Key must be 64 hex characters (256 bits)');
-  }
+  // Step 6: Import K2 as key to encrypt K1
+  const k2Key = await crypto.subtle.importKey(
+    'raw',
+    new Uint8Array([...k2, ...new Uint8Array(28)]), // Pad K2 to 32 bytes
+    { name: 'AES-GCM', length: 256 },
+    false,
+    ['encrypt']
+  );
   
-  return {
-    front: fullKeyHex.substring(0, 56),  // First 56 hex chars (224 bits)
-    secret: fullKeyHex.substring(56)     // Last 8 hex chars (32 bits)
-  };
-};
-
-/**
- * Combine front and secret parts to reconstruct full key
- */
-export const combineKey = (front: string, secret: string): string => {
-  return front + secret;
-};
-
-/**
- * Generate share URL
- */
-export const generateShareUrl = (tokenId: number, secretKey: string): string => {
-  const baseUrl = typeof window !== 'undefined' 
-    ? window.location.origin 
-    : 'https://app.bluedocs.com';
+  // Step 7: Encrypt K1 using K2
+  const encryptedK1 = await encryptAESGCM(k1.buffer as ArrayBuffer, k2Key, iv.buffer as ArrayBuffer);
   
-  return `${baseUrl}/view/${tokenId}#key=${secretKey}`;
-};
-
-/**
- * Parse share URL to extract tokenId and secret key
- */
-export const parseShareUrl = (url: string): { tokenId: number; secretKey: string } | null => {
-  try {
-    const urlObj = new URL(url);
-    const pathMatch = urlObj.pathname.match(/\/view\/(\d+)/);
-    const secretKey = urlObj.hash.replace('#key=', '');
-    
-    if (pathMatch && secretKey) {
-      return {
-        tokenId: parseInt(pathMatch[1]),
-        secretKey: secretKey
-      };
+  // Step 8: Create payload
+  const payload: SharePayload = {
+    version: '1.0',
+    type: 'shared-doc',
+    doc: arrayBufferToBase64(encryptedContent),
+    title: arrayBufferToBase64(encryptedTitle),
+    key: arrayBufferToHex(encryptedK1),
+    iv: arrayBufferToHex(iv.buffer as ArrayBuffer),
+    meta: {
+      fileType,
+      createdAt: new Date().toISOString()
     }
-  } catch (e) {
-    console.error('Failed to parse share URL:', e);
-  }
+  };
   
-  return null;
-}; 
+  return {
+    payload,
+    urlKey: arrayBufferToHex(k2.buffer as ArrayBuffer)
+  };
+}
+
+/**
+ * Decrypt share payload
+ */
+export async function decryptSharePayload(
+  payload: SharePayload,
+  urlKey: string
+): Promise<{ content: string; title: string }> {
+  // Step 1: Convert hex strings back to array buffers
+  const k2 = hexToArrayBuffer(urlKey);
+  const iv = hexToArrayBuffer(payload.iv);
+  const encryptedK1 = hexToArrayBuffer(payload.key);
+  const encryptedContent = base64ToArrayBuffer(payload.doc);
+  const encryptedTitle = base64ToArrayBuffer(payload.title);
+  
+  // Step 2: Import K2 as key to decrypt K1
+  const k2Key = await crypto.subtle.importKey(
+    'raw',
+    new Uint8Array([...new Uint8Array(k2), ...new Uint8Array(28)]), // Pad K2 to 32 bytes
+    { name: 'AES-GCM', length: 256 },
+    false,
+    ['decrypt']
+  );
+  
+  // Step 3: Decrypt K1 using K2
+  const k1 = await decryptAESGCM(encryptedK1, k2Key, iv);
+  
+  // Step 4: Reconstruct full key
+  const fullKey = new Uint8Array(32);
+  fullKey.set(new Uint8Array(k1), 0);
+  fullKey.set(new Uint8Array(k2), 28);
+  
+  // Step 5: Import full key for decryption
+  const cryptoKey = await crypto.subtle.importKey(
+    'raw',
+    fullKey,
+    { name: 'AES-GCM', length: 256 },
+    false,
+    ['decrypt']
+  );
+  
+  // Step 6: Decrypt content and title
+  const decryptedContent = await decryptAESGCM(encryptedContent, cryptoKey, iv);
+  const decryptedTitle = await decryptAESGCM(encryptedTitle, cryptoKey, iv);
+  
+  // Step 7: Convert back to strings
+  const decoder = new TextDecoder();
+  return {
+    content: decoder.decode(decryptedContent),
+    title: decoder.decode(decryptedTitle)
+  };
+}
