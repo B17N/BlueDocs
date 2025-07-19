@@ -343,7 +343,7 @@ export function EditorPane({ file, onUpdateFile, isNew, isMobile, isProcessing, 
           {/* Editor Content Area */}
           <div className={`flex-1 flex ${isMobile ? "flex-col" : "flex-row"} overflow-hidden`}>
             {/* Markdown Editor */}
-            <div className="flex-1 flex flex-col">
+            <div className={`${isMobile ? "flex-1" : "w-1/2"} flex flex-col min-w-0`}>
               <div className="p-2 border-b bg-muted/10">
                 <span className="text-xs font-medium text-muted-foreground">Markdown</span>
               </div>
@@ -361,12 +361,12 @@ export function EditorPane({ file, onUpdateFile, isNew, isMobile, isProcessing, 
             {/* Preview Pane */}
             {!isMobile && (
               <>
-                <div className="w-px bg-border" />
-                <div className="flex-1 flex flex-col">
+                <div className="w-px bg-border flex-shrink-0" />
+                <div className="w-1/2 flex flex-col min-w-0">
                   <div className="p-2 border-b bg-muted/10">
                     <span className="text-xs font-medium text-muted-foreground">Preview</span>
                   </div>
-                  <div className="flex-1 p-4 overflow-y-auto prose prose-sm dark:prose-invert max-w-none">
+                  <div className="flex-1 p-4 overflow-y-auto prose prose-sm dark:prose-invert max-w-none overflow-x-auto">
                     <ReactMarkdown
                       remarkPlugins={[remarkGfm]}
                       rehypePlugins={[rehypeHighlight]}
