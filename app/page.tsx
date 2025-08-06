@@ -1272,11 +1272,8 @@ export default function MarkdownManagerPage() {
           )}
           
           <div className="mt-8 max-w-md text-sm text-muted-foreground space-y-2 text-center">
-            <p>My mind is mine — not yours (AI, Zuck, Elon, Sam… etc).</p>
-            <p>What I share with my friends stays between us.</p>
-            <p>No third parties. No platforms.</p>
-            <p className="mt-3">No warranty. No guarantees.</p>
-            <p>Verify me on GitHub — principles and code.</p>
+            <p>Privacy is a norm</p>
+            
           </div>
         </div>
       )}
