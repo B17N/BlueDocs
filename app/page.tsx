@@ -1235,7 +1235,7 @@ export default function MarkdownManagerPage() {
         </div>
         <div className="flex items-center gap-2">
           <a
-            href="https://bluestone.gitbook.io/bluedoku/"
+            href="https://bluedoku.gitbook.io/bluedoku"
             target="_blank"
             rel="noopener noreferrer"
             className="inline-flex items-center gap-1 px-3 py-2 text-sm font-medium text-muted-foreground hover:text-primary transition-colors rounded-md hover:bg-muted"
