@@ -9,7 +9,7 @@ import { EditorPane } from "@/components/editor-pane";
 import { ConnectWalletButton } from "@/components/connect-wallet-button";
 import { SettingsButton } from "@/components/settings-button";
 // 导入图标：布局面板、编辑器、帮助圆圈
-import { LayoutPanelLeft, Edit3, HelpCircle } from "lucide-react";
+import { LayoutPanelLeft, Edit3, HelpCircle, ExternalLink } from "lucide-react";
 // 导入自定义钩子：检测是否为移动设备
 import { useMediaQuery } from "@/hooks/use-media-query";
 // 导入 Toast 通知组件和方法
@@ -1234,7 +1234,16 @@ export default function MarkdownManagerPage() {
           </h1>
         </div>
         <div className="flex items-center gap-2">
-         
+          <a
+            href="https://bluestone.gitbook.io/bluedoku/"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-1 px-3 py-2 text-sm font-medium text-muted-foreground hover:text-primary transition-colors rounded-md hover:bg-muted"
+            title="How it works and guide"
+          >
+            <span className="hidden sm:inline">Guide</span>
+            <ExternalLink className="h-4 w-4" />
+          </a>
           <ConnectWalletButton
             isConnected={isWalletConnected}
             walletAddress={walletAddress}
@@ -1272,7 +1281,7 @@ export default function MarkdownManagerPage() {
           )}
           
           <div className="mt-8 max-w-md text-sm text-muted-foreground space-y-2 text-center">
-            <p>Privacy is a norm</p>
+            <p>Privacy is a norm.</p>
             
           </div>
         </div>
